@@ -65,6 +65,9 @@ savings = st.number_input(
 
 if st.button("금융상태 분석"):
 
+    st.session_state["analyzed"] = True
+
+if st.session_state.get("analyzed", False):
     metrics = calculate_metrics(
         income,
         fixed_expense,
@@ -146,4 +149,121 @@ if st.button("금융상태 분석"):
     st.metric(
         "12개월 후 예상 금융자산",
         f"{final_asset:,.0f}원"
+    )
+
+    st.header("5. What-if 시뮬레이션")
+
+    st.write(
+        "소득이나 지출 습관을 변경했을 때 "
+        "미래 금융상태가 어떻게 달라지는지 확인해보세요."
+    )
+
+    expense_reduction = st.slider(
+        "월 변동지출 줄이기",
+        min_value=0,
+        max_value=1000000,
+        value=0,
+        step=50000,
+        format="%d원"
+    )
+
+    income_increase = st.slider(
+        "월 소득 늘리기",
+        min_value=0,
+        max_value=1000000,
+        value=0,
+        step=50000,
+        format="%d원"
+    )
+
+    new_income = income + income_increase
+
+    new_variable_expense = max(
+        variable_expense - expense_reduction,
+        0
+    )
+
+    new_metrics = calculate_metrics(
+        new_income,
+        fixed_expense,
+        new_variable_expense,
+        debt_payment,
+        savings
+    )
+
+    new_risk = calculate_risk(new_metrics)
+
+    new_forecast = forecast_assets(
+        savings,
+        new_metrics["monthly_surplus"],
+        months=12
+    )
+
+    new_final_asset = new_forecast.iloc[-1]["asset"]
+
+    st.subheader("시뮬레이션 결과")
+
+    before_col, after_col = st.columns(2)
+
+    with before_col:
+        st.write("### 현재 상태")
+
+        st.metric(
+            "월 잉여금",
+            f'{metrics["monthly_surplus"]:,.0f}원'
+        )
+
+        st.metric(
+            "위험 점수",
+            f'{risk["score"]}점'
+        )
+
+        st.metric(
+            "12개월 후 예상자산",
+            f"{final_asset:,.0f}원"
+        )
+
+    with after_col:
+        st.write("### 변경 후")
+
+        st.metric(
+            "월 잉여금",
+            f'{new_metrics["monthly_surplus"]:,.0f}원',
+            delta=(
+                f'{new_metrics["monthly_surplus"] - metrics["monthly_surplus"]:,.0f}원'
+            )
+        )
+
+        st.metric(
+            "위험 점수",
+            f'{new_risk["score"]}점',
+            delta=f'{new_risk["score"] - risk["score"]}점',
+            delta_color="inverse"
+        )
+
+        st.metric(
+            "12개월 후 예상자산",
+            f"{new_final_asset:,.0f}원",
+            delta=f"{new_final_asset - final_asset:,.0f}원"
+        )
+
+    st.subheader("현재 vs 개선 후 12개월 전망")
+
+    comparison = forecast.copy()
+
+    comparison = comparison.rename(
+        columns={
+            "asset": "현재 예상자산"
+            }
+    )
+
+    comparison["개선 후 예상자산"] = new_forecast["asset"]
+
+    st.line_chart(
+        comparison,
+        x="month",
+        y=[
+                "현재 예상자산",
+                "개선 후 예상자산"
+            ]
     )
