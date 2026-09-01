@@ -126,6 +126,8 @@ if st.session_state.get("analyzed", False):
 
     risk = calculate_risk(metrics)
 
+    health_score = 100 - risk["score"]
+
     st.header("2. 금융 건강 진단")
 
     col1, col2, col3, col4 = st.columns(4)
@@ -151,13 +153,23 @@ if st.session_state.get("analyzed", False):
     )
 
 
-    st.header("3. 금융 위험도")
+    st.header("3. 금융 건강도")
 
-    st.metric(
-        "위험 점수",
-        f'{risk["score"]} / 100'
-    )
+    health_col1, health_col2 = st.columns(2)
 
+    with health_col1:
+        st.metric(
+            "💚 금융 건강점수",
+            f"{health_score} / 100"
+        )
+
+    with health_col2:
+        st.metric(
+            "⚠️ 금융 위험점수",
+            f"{risk['score']} / 100"
+        )
+    
+    st.progress(health_score)
 
     if risk["level"] == "안정":
         st.success("🟢 안정")
@@ -167,6 +179,21 @@ if st.session_state.get("analyzed", False):
 
     else:
         st.error("🔴 위험")
+
+    if health_score >= 80:
+        st.write("현재 전반적인 금융상태가 안정적입니다.")
+
+    elif health_score >= 50:
+        st.write(
+            "일부 금융지표에 개선이 필요합니다. "
+            "지출과 부채상환 부담을 점검해보세요."
+        )
+    
+    else:
+        st.write(
+            "현재 금융 위험도가 높은 상태입니다. "
+            "지출 구조와 비상자금 확보를 우선적으로 점검할 필요가 있습니다."
+        )
 
     st.subheader("주요 위험요인")
 
@@ -240,6 +267,7 @@ if st.session_state.get("analyzed", False):
     )
 
     new_risk = calculate_risk(new_metrics)
+    new_health_score = 100 - new_risk["score"]
 
     new_forecast = forecast_assets(
         savings,
@@ -267,6 +295,11 @@ if st.session_state.get("analyzed", False):
         )
 
         st.metric(
+            "금융 건강점수",
+            f"{health_score}점"
+        )
+
+        st.metric(
             "12개월 후 예상자산",
             f"{final_asset:,.0f}원"
         )
@@ -287,6 +320,12 @@ if st.session_state.get("analyzed", False):
             f'{new_risk["score"]}점',
             delta=f'{new_risk["score"] - risk["score"]}점',
             delta_color="inverse"
+        )
+
+        st.metric(
+            "금융 건강점수",
+            f"{new_health_score}점",
+            delta=f"{new_health_score - health_score}점"
         )
 
         st.metric(
