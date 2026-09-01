@@ -14,11 +14,26 @@ st.set_page_config(
 
 st.title("💰 청년 금융 건강 AI")
 
-st.write(
-    "현재 금융상태를 입력하면 "
-    "금융 건강도와 위험요인을 분석합니다."
+st.markdown(
+    "나의 현재 금융상태를 진단하고, "
+    "미래 금융위험과 개선 가능성을 시뮬레이션 해보세요!"
 )
+st.divider()
 
+if "income" not in st.session_state:
+    st.session_state["income"] = 3000000
+
+if "fixed_expense" not in st.session_state:
+    st.session_state["fixed_expense"] = 1200000
+
+if "variable_expense" not in st.session_state:
+    st.session_state["variable_expense"] = 900000
+
+if "debt_payment" not in st.session_state:
+    st.session_state["debt_payment"] = 500000
+
+if "savings" not in st.session_state:
+    st.session_state["savings"] = 2000000
 
 st.header("1. 금융정보 입력")
 st.write("테스트용 금융 프로필을 선택하거나 직접 입력할 수 있습니다.")
@@ -53,53 +68,51 @@ with demo3:
         st.session_state["analyzed"] = True
 
 
-income = st.number_input(
-    "월 소득",
-    min_value=0,
-    value=3000000,
-    step=100000,
-    key="income"
-)
+input_col1, input_col2 = st.columns(2)
+
+with input_col1:
+    income = st.number_input(
+        "💵 월 소득",
+        min_value=0,
+        step=100000,
+        key="income"
+    )
+
+    fixed_expense = st.number_input(
+        "🏠 월 고정지출",
+        min_value=0,
+        step=100000,
+        key="fixed_expense"
+    )
+
+    savings = st.number_input(
+        "💰 현재 저축액",
+        min_value=0,
+        step=100000,
+        key="savings"
+    )
+
+with input_col2:
+    variable_expense = st.number_input(
+        "🛒 월 변동지출",
+        min_value=0,
+        step=100000,
+        key="variable_expense"
+    )
+
+    debt_payment = st.number_input(
+        "💳 월 대출상환액",
+        min_value=0,
+        step=100000,
+        key="debt_payment"
+    )
 
 
-fixed_expense = st.number_input(
-    "월 고정지출",
-    min_value=0,
-    value=1200000,
-    step=100000,
-    key="fixed_expense"
-)
-
-
-variable_expense = st.number_input(
-    "월 변동지출",
-    min_value=0,
-    value=900000,
-    step=100000,
-    key="variable_expense"
-)
-
-
-debt_payment = st.number_input(
-    "월 대출상환액",
-    min_value=0,
-    value=500000,
-    step=100000,
-    key="debt_payment"
-)
-
-
-savings = st.number_input(
-    "현재 저축액",
-    min_value=0,
-    value=2000000,
-    step=100000,
-    key="savings"
-)
-
-
-if st.button("금융상태 분석"):
-
+if st.button(
+    "🔍 금융상태 분석하기",
+    type="primary",
+    use_container_width=True
+):
     st.session_state["analyzed"] = True
 
 if st.session_state.get("analyzed", False):
@@ -302,3 +315,9 @@ if st.session_state.get("analyzed", False):
                 "개선 후 예상자산"
             ]
     )
+st.divider()
+
+st.caption(
+    "※ 본 서비스는 금융상태 진단 및 금융교육을 위한 MVP 프로토타입입니다. "
+    "분석 결과는 실제 투자, 대출 또는 금융상품 가입에 대한 전문적인 금융 자문을 의미하지 않습니다."
+)
