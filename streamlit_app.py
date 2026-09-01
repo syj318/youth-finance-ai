@@ -2,6 +2,7 @@ import streamlit as st
 
 from src.metrics import calculate_metrics
 from src.risk_engine import calculate_risk
+from src.forecast import forecast_assets
 
 
 st.set_page_config(
@@ -116,15 +117,33 @@ if st.button("금융상태 분석"):
     else:
         st.error("🔴 위험")
 
-
     st.subheader("주요 위험요인")
 
     if risk["reasons"]:
-
         for reason in risk["reasons"]:
             st.write("•", reason)
-
     else:
         st.write(
             "현재 주요 금융 위험요인이 발견되지 않았습니다."
         )
+
+    st.header("4. 12개월 금융상태 전망")
+
+    forecast = forecast_assets(
+        savings,
+        metrics["monthly_surplus"],
+        months=12
+    )
+
+    st.line_chart(
+        forecast,
+        x="month",
+        y="asset"
+    )
+
+    final_asset = forecast.iloc[-1]["asset"]
+
+    st.metric(
+        "12개월 후 예상 금융자산",
+        f"{final_asset:,.0f}원"
+    )
