@@ -21,13 +21,44 @@ st.write(
 
 
 st.header("1. 금융정보 입력")
+st.write("테스트용 금융 프로필을 선택하거나 직접 입력할 수 있습니다.")
+
+demo1, demo2, demo3 = st.columns(3)
+
+with demo1:
+    if st.button("🟢 안정 사용자"):
+        st.session_state["income"] = 4000000
+        st.session_state["fixed_expense"] = 1000000
+        st.session_state["variable_expense"] = 700000
+        st.session_state["debt_payment"] = 200000
+        st.session_state["savings"] = 10000000
+        st.session_state["analyzed"] = True
+
+with demo2:
+    if st.button("🟡 주의 사용자"):
+        st.session_state["income"] = 3000000
+        st.session_state["fixed_expense"] = 1200000
+        st.session_state["variable_expense"] = 900000
+        st.session_state["debt_payment"] = 500000
+        st.session_state["savings"] = 2000000
+        st.session_state["analyzed"] = True
+
+with demo3:
+    if st.button("🔴 위험 사용자"):
+        st.session_state["income"] = 2500000
+        st.session_state["fixed_expense"] = 1300000
+        st.session_state["variable_expense"] = 900000
+        st.session_state["debt_payment"] = 700000
+        st.session_state["savings"] = 500000
+        st.session_state["analyzed"] = True
 
 
 income = st.number_input(
     "월 소득",
     min_value=0,
     value=3000000,
-    step=100000
+    step=100000,
+    key="income"
 )
 
 
@@ -35,7 +66,8 @@ fixed_expense = st.number_input(
     "월 고정지출",
     min_value=0,
     value=1200000,
-    step=100000
+    step=100000,
+    key="fixed_expense"
 )
 
 
@@ -43,7 +75,8 @@ variable_expense = st.number_input(
     "월 변동지출",
     min_value=0,
     value=900000,
-    step=100000
+    step=100000,
+    key="variable_expense"
 )
 
 
@@ -51,7 +84,8 @@ debt_payment = st.number_input(
     "월 대출상환액",
     min_value=0,
     value=500000,
-    step=100000
+    step=100000,
+    key="debt_payment"
 )
 
 
@@ -59,7 +93,8 @@ savings = st.number_input(
     "현재 저축액",
     min_value=0,
     value=2000000,
-    step=100000
+    step=100000,
+    key="savings"
 )
 
 
