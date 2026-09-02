@@ -26,8 +26,11 @@ if "income" not in st.session_state:
 if "fixed_expense" not in st.session_state:
     st.session_state["fixed_expense"] = 1200000
 
-if "variable_expense" not in st.session_state:
-    st.session_state["variable_expense"] = 900000
+if "living_expense" not in st.session_state:
+    st.session_state["living_expense"] = 900000
+
+if "monthly_savings" not in st.session_state:
+    st.session_state["monthly_savings"] = 300000
 
 if "debt_payment" not in st.session_state:
     st.session_state["debt_payment"] = 500000
@@ -44,8 +47,9 @@ with demo1:
     if st.button("🟢 안정 사용자"):
         st.session_state["income"] = 4000000
         st.session_state["fixed_expense"] = 1000000
-        st.session_state["variable_expense"] = 700000
+        st.session_state["living_expense"] = 700000
         st.session_state["debt_payment"] = 200000
+        st.session_state["monthly_savings"] = 1000000
         st.session_state["savings"] = 10000000
         st.session_state["analyzed"] = True
 
@@ -53,8 +57,9 @@ with demo2:
     if st.button("🟡 주의 사용자"):
         st.session_state["income"] = 3000000
         st.session_state["fixed_expense"] = 1200000
-        st.session_state["variable_expense"] = 900000
+        st.session_state["living_expense"] = 900000
         st.session_state["debt_payment"] = 500000
+        st.session_state["monthly_savings"] = 300000
         st.session_state["savings"] = 2000000
         st.session_state["analyzed"] = True
 
@@ -62,8 +67,9 @@ with demo3:
     if st.button("🔴 위험 사용자"):
         st.session_state["income"] = 2500000
         st.session_state["fixed_expense"] = 1300000
-        st.session_state["variable_expense"] = 900000
+        st.session_state["living_expense"] = 900000
         st.session_state["debt_payment"] = 700000
+        st.session_state["monthly_savings"] = 0
         st.session_state["savings"] = 500000
         st.session_state["analyzed"] = True
 
@@ -85,19 +91,19 @@ with input_col1:
         key="fixed_expense"
     )
 
-    savings = st.number_input(
-        "💰 현재 저축액",
+    monthly_savings = st.number_input(
+        "🏦 월 저축금액",
         min_value=0,
-        step=100000,
-        key="savings"
+        step=50000,
+        key="monthly_savings"
     )
 
 with input_col2:
-    variable_expense = st.number_input(
-        "🛒 월 변동지출",
+    living_expense = st.number_input(
+        "🛒 월 생활비",
         min_value=0,
         step=100000,
-        key="variable_expense"
+        key="living_expense"
     )
 
     debt_payment = st.number_input(
@@ -107,20 +113,86 @@ with input_col2:
         key="debt_payment"
     )
 
+    savings = st.number_input(
+        "💰 현재 저축액",
+        min_value=0,
+        step=100000,
+        key="savings"
+    )
+
+monthly_outflow = (
+    fixed_expense
+    + living_expense
+    + debt_payment
+    + monthly_savings
+)
+
+expected_balance = income - monthly_outflow
+
+st.subheader("월 현금흐름 확인")
+
+cash_col1, cash_col2, cash_col3 = st.columns(3)
+
+cash_col1.metric(
+    "월 소득",
+    f"{income:,.0f}원"
+)
+
+cash_col2.metric(
+    "월 지출·저축 합계",
+    f"{monthly_outflow:,.0f}원"
+)
+
+cash_col3.metric(
+    "월 잔여금",
+    f"{expected_balance:,.0f}원"
+)
+
+if expected_balance < 0:
+    st.error(
+        f"⚠️ 현재 입력값 기준으로 매월 "
+        f"{abs(expected_balance):,.0f}원이 부족합니다."
+    )
+
+elif expected_balance == 0:
+    st.warning(
+        "월 소득이 지출과 저축으로 모두 사용되고 있습니다. "
+        "예상치 못한 지출에 대비할 여유자금이 없습니다."
+    )
+
+else:
+    st.success(
+        f"현재 계획대로라면 매월 "
+        f"{expected_balance:,.0f}원의 여유자금이 남습니다."
+    )
+
 
 if st.button(
     "🔍 금융상태 분석하기",
     type="primary",
     use_container_width=True
 ):
-    st.session_state["analyzed"] = True
+    if income == 0:
+        st.error("월 소득을 입력해주세요.")
+        st.session_state["analyzed"] = False
 
+    elif expected_balance < 0:
+        st.warning(
+            "현재 소득보다 지출과 저축 계획이 큽니다. "
+            "분석 결과에서 적자 상태로 진단됩니다."
+        )
+        st.session_state["analyzed"] = True
+
+    else:
+        st.session_state["analyzed"] = True
+        
 if st.session_state.get("analyzed", False):
     metrics = calculate_metrics(
         income,
         fixed_expense,
-        variable_expense,
+        living_expense,
         debt_payment,
+        monthly_savings,
         savings
     )
 
@@ -138,8 +210,8 @@ if st.session_state.get("analyzed", False):
     )
 
     col2.metric(
-        "저축 여력",
-        f'{metrics["surplus_rate"]:.1f}%'
+        "월 저축률",
+        f'{metrics["savings_rate"]:.1f}%'
     )
 
     col3.metric(
@@ -209,7 +281,7 @@ if st.session_state.get("analyzed", False):
 
     forecast = forecast_assets(
         savings,
-        metrics["monthly_surplus"],
+        monthly_savings,
         months=12
     )
 
@@ -234,7 +306,7 @@ if st.session_state.get("analyzed", False):
     )
 
     expense_reduction = st.slider(
-        "월 변동지출 줄이기",
+        "월 생활비 줄이기",
         min_value=0,
         max_value=1000000,
         value=0,
@@ -253,16 +325,23 @@ if st.session_state.get("analyzed", False):
 
     new_income = income + income_increase
 
-    new_variable_expense = max(
-        variable_expense - expense_reduction,
+    new_living_expense = max(
+        living_expense - expense_reduction,
         0
+    )
+
+    new_monthly_savings = (
+        monthly_savings 
+        + expense_reduction
+        + income_increase 
     )
 
     new_metrics = calculate_metrics(
         new_income,
         fixed_expense,
-        new_variable_expense,
+        new_living_expense,
         debt_payment,
+        new_monthly_savings,
         savings
     )
 
@@ -271,7 +350,7 @@ if st.session_state.get("analyzed", False):
 
     new_forecast = forecast_assets(
         savings,
-        new_metrics["monthly_surplus"],
+        new_monthly_savings,
         months=12
     )
 
