@@ -1,17 +1,19 @@
 def calculate_metrics(
     income,
     fixed_expense,
-    variable_expense,
+    living_cost,
     debt_payment,
-    savings
+    monthly_saving,
+    current_savings
 ):
-    total_expense = (
+    essential_outflow = (
         fixed_expense
-        + variable_expense
+        + living_cost
         + debt_payment
     )
 
-    monthly_surplus = income - total_expense
+    available_for_saving = income - essential_outflow
+    monthly_surplus = available_for_saving - monthly_saving
 
     if income > 0:
         surplus_rate = monthly_surplus / income * 100
@@ -20,17 +22,25 @@ def calculate_metrics(
         surplus_rate = 0
         debt_service_rate = 0
 
-    living_expense = fixed_expense + variable_expense
+    living_expense = fixed_expense + living_cost
 
-    if living_expense > 0:
-        emergency_months = savings / living_expense
+    if essential_outflow > 0:
+        emergency_months = current_savings / essential_outflow
     else:
         emergency_months = 0
 
     return {
-        "total_expense": total_expense,
+        "monthly_income": income,
+        "fixed_expense": fixed_expense,
+        "variable_expense": living_cost,
+        "loan_payment": debt_payment,
+        "monthly_saving": monthly_saving,
+        "current_savings": current_savings,
+
+        "total_expense": essential_outflow,
+        "available_for_saving": available_for_saving,
         "monthly_surplus": monthly_surplus,
         "surplus_rate": surplus_rate,
         "debt_service_rate": debt_service_rate,
-        "emergency_months": emergency_months
+        "emergency_months": emergency_months,
     }
