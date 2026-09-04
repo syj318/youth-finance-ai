@@ -198,7 +198,7 @@ if st.session_state.get("analyzed", False):
 
     risk = calculate_risk(metrics)
 
-    health_score = 100 - risk["score"]
+    health_score = max(0, min(100, 100 - risk["score"]))
 
     st.header("2. 금융 건강 진단")
 
@@ -232,16 +232,16 @@ if st.session_state.get("analyzed", False):
     with health_col1:
         st.metric(
             "💚 금융 건강점수",
-            f"{health_score} / 100"
+            f"{health_score:.1f} / 100"
         )
 
     with health_col2:
         st.metric(
             "⚠️ 금융 위험점수",
-            f"{risk['score']} / 100"
+            f"{risk['score']:.1f} / 100"
         )
     
-    st.progress(health_score)
+    st.progress(health_score / 100)
 
     if risk["level"] == "안정":
         st.success("🟢 안정")
@@ -325,15 +325,19 @@ if st.session_state.get("analyzed", False):
 
     new_income = income + income_increase
 
-    new_living_expense = max(
-        living_expense - expense_reduction,
-        0
+    actual_expense_reduction = min(
+        expense_reduction,
+        living_expense
+    )
+
+    new_living_expense = (
+        living_expense - actual_expense_reduction
     )
 
     new_monthly_savings = (
-        monthly_savings 
-        + expense_reduction
-        + income_increase 
+        monthly_savings
+        + actual_expense_reduction
+        + income_increase
     )
 
     new_metrics = calculate_metrics(
@@ -346,7 +350,8 @@ if st.session_state.get("analyzed", False):
     )
 
     new_risk = calculate_risk(new_metrics)
-    new_health_score = 100 - new_risk["score"]
+    new_health_score = max(0,min(100, 100 - new_risk["score"]))
+
 
     new_forecast = forecast_assets(
         savings,
@@ -370,12 +375,12 @@ if st.session_state.get("analyzed", False):
 
         st.metric(
             "위험 점수",
-            f'{risk["score"]}점'
+            f'{risk["score"]:.1f}점'
         )
 
         st.metric(
             "금융 건강점수",
-            f"{health_score}점"
+            f"{health_score:.1f}점"
         )
 
         st.metric(
@@ -396,15 +401,15 @@ if st.session_state.get("analyzed", False):
 
         st.metric(
             "위험 점수",
-            f'{new_risk["score"]}점',
-            delta=f'{new_risk["score"] - risk["score"]}점',
+            f'{new_risk["score"]:.1f}점',
+            delta=f'{new_risk["score"] - risk["score"]:.1f}점',
             delta_color="inverse"
         )
 
         st.metric(
             "금융 건강점수",
-            f"{new_health_score}점",
-            delta=f"{new_health_score - health_score}점"
+            f"{new_health_score:.1f}점",
+            delta=f"{new_health_score - health_score:.1f}점"
         )
 
         st.metric(
