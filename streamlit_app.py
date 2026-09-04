@@ -241,7 +241,7 @@ if st.session_state.get("analyzed", False):
             f"{risk['score']} / 100"
         )
     
-    st.progress(health_score)
+    st.progress(health_score / 100)
 
     if risk["level"] == "안정":
         st.success("🟢 안정")
