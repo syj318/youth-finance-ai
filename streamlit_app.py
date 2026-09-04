@@ -3,7 +3,7 @@ import streamlit as st
 from src.metrics import calculate_metrics
 from src.risk_engine import calculate_risk
 from src.forecast import forecast_assets
-
+from src.optimizer import find_improvement_plans
 
 st.set_page_config(
     page_title="청년 금융 AI",
@@ -277,7 +277,7 @@ if st.session_state.get("analyzed", False):
             "현재 주요 금융 위험요인이 발견되지 않았습니다."
         )
     
-        st.subheader("영역별 위험점수")
+    st.subheader("영역별 위험점수")
 
     domain_labels = {
         "cashflow": "현금흐름",
@@ -417,14 +417,14 @@ if st.session_state.get("analyzed", False):
     new_expected_balance = new_income - new_monthly_outflow
 
     if new_expected_balance < 0:
-        st.warning(
-            f"⚠️ 이 계획은 매월 "
+        st.error(
+            f"⚠️ 실행 불가능한 계획입니다. 매월 "
             f"{abs(new_expected_balance):,.0f}원이 부족합니다. "
-            "추가 저축액이나 지출 계획을 조정해보세요."
+            "추가 저축액을 줄이거나 소득·지출 계획을 조정해주세요."
         )
     else:
         st.success(
-            f"✅ 이 계획을 적용해도 매월 "
+            f"✅ 실행 가능한 계획입니다. 매월 "
             f"{new_expected_balance:,.0f}원의 여유자금이 남습니다."
         )
 
@@ -468,6 +468,10 @@ if st.session_state.get("analyzed", False):
         "변경 후 월 저축",
         f"{new_monthly_savings:,.0f}원",
         delta=f"{new_monthly_savings - monthly_savings:,.0f}원"
+    )
+
+    st.write(
+        f"위험등급 변화: **{risk['level']} → {new_risk['level']}**"
     )
 
     before_col, after_col = st.columns(2)
@@ -545,6 +549,95 @@ if st.session_state.get("analyzed", False):
                 "개선 후 예상자산"
             ]
     )
+
+    st.header("6. 자동 맞춤 개선안")
+
+    st.write(
+        "현재 금융상태를 기준으로 위험점수를 낮출 수 있는 "
+        "현실적인 행동 조합을 자동으로 탐색합니다."
+    )
+
+    plans = find_improvement_plans(
+        income=income,
+        fixed_expense=fixed_expense,
+        living_expense=living_expense,
+        debt_payment=debt_payment,
+        monthly_savings=monthly_savings,
+        savings=savings,
+    )
+
+    if not plans:
+        st.info(
+            "현재 조건에서는 추가적인 현실적 개선안을 찾지 못했습니다."
+        )
+
+    else:
+        tabs = st.tabs(
+            [f"🎯 {plan['name']}" for plan in plans]
+        )
+
+        for tab, plan in zip(tabs, plans):
+            with tab:
+
+                st.markdown(f"### {plan['name']}")
+
+                st.caption(
+                    "현재 금융상태를 기준으로 자동 탐색된 개선 행동입니다."
+                )
+
+                st.markdown("#### 💡 추천 행동")
+
+                action_col1, action_col2, action_col3 = st.columns(3)
+
+                action_col1.metric(
+                    "생활비 절감",
+                    f"{plan['living_expense_reduction']:,.0f}원/월"
+                )
+
+                action_col2.metric(
+                    "소득 증가",
+                    f"{plan['income_increase']:,.0f}원/월"
+                )
+
+                action_col3.metric(
+                    "추가 저축",
+                    f"{plan['extra_savings']:,.0f}원/월"
+                )
+
+                st.divider()
+
+                st.markdown("#### 📊 예상 개선 결과")
+
+                result_col1, result_col2, result_col3, result_col4 = st.columns(4)
+
+                result_col1.metric(
+                    "금융 건강점수",
+                    f"{plan['health_score']:.1f}점",
+                    delta=f"{plan['health_score'] - health_score:+.1f}점"
+                )
+
+                result_col2.metric(
+                    "위험점수",
+                    f"{plan['risk_score']:.1f}점",
+                    delta=f"-{plan['risk_reduction']:.1f}점",
+                    delta_color="inverse"
+                )
+
+                result_col3.metric(
+                    "위험등급",
+                    plan["risk_level"]
+                )
+
+                result_col4.metric(
+                    "월 잉여금",
+                    f"{plan['new_monthly_surplus']:,.0f}원"
+                )
+
+                st.info(
+                    f"월 저축액은 "
+                    f"**{monthly_savings:,.0f}원 → "
+                    f"{plan['new_monthly_savings']:,.0f}원**으로 변경됩니다."
+                )
 st.divider()
 
 st.caption(
