@@ -243,14 +243,14 @@ if st.session_state.get("analyzed", False):
     
     st.progress(health_score / 100)
 
-    if risk["level"] == "안정":
-        st.success("🟢 안정")
+    if risk["level"] in {"매우 안정", "안정", "양호"}:
+        st.success(f"🟢 {risk['level']}")
 
     elif risk["level"] == "주의":
         st.warning("🟡 주의")
 
     else:
-        st.error("🔴 위험")
+        st.error(f"🔴 {risk['level']}")
 
     if health_score >= 80:
         st.write("현재 전반적인 금융상태가 안정적입니다.")

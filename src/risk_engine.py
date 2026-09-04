@@ -232,6 +232,29 @@ def round_score(value: float) -> float:
     return round(clamp(value, 0, 100), 2)
 
 
+def make_score_component(
+    name: str,
+    score: float,
+    max_score: float,
+    metric: str,
+    value: float,
+    unit: str,
+    explanation: str,
+) -> Dict[str, Any]:
+    """영역 점수를 구성하는 세부 항목을 화면 표시용으로 정리한다."""
+    rounded_score = round(score, 2)
+    return {
+        "name": name,
+        "score": rounded_score,
+        "max_score": max_score,
+        "health_deduction": rounded_score,
+        "metric": metric,
+        "value": round(value, 2),
+        "unit": unit,
+        "explanation": explanation,
+    }
+
+
 # ============================================================
 # 5. Risk Level
 # ============================================================
@@ -306,6 +329,29 @@ def calculate_cashflow_risk(
 
     score = round_score(living_score + surplus_score)
 
+    breakdown = [
+        make_score_component(
+            "생활지출 부담",
+            living_score,
+            18,
+            "living_expense_rate",
+            living_expense_rate,
+            "%",
+            f"생활지출이 소득의 {living_expense_rate:.1f}%여서 위험점수 "
+            f"{living_score:.2f}점이 추가되었습니다.",
+        ),
+        make_score_component(
+            "월 잔여금 부족",
+            surplus_score,
+            12,
+            "surplus_rate",
+            surplus_rate,
+            "%",
+            f"지출과 저축 후 잔여금이 소득의 {surplus_rate:.1f}%여서 위험점수 "
+            f"{surplus_score:.2f}점이 추가되었습니다.",
+        ),
+    ]
+
     reasons = []
 
     if surplus_rate < 0:
@@ -335,6 +381,8 @@ def calculate_cashflow_risk(
         "score": score,
         "max_score": 30,
         "level": get_domain_level(score, 30),
+        "explanation": f"생활지출 {living_score:.2f}점 + 잔여금 {surplus_score:.2f}점 = 현금흐름 위험 {score:.2f}점입니다.",
+        "breakdown": breakdown,
         "reasons": reasons,
         "metrics": {
             "living_expense_rate": round(living_expense_rate, 2),
@@ -367,6 +415,19 @@ def calculate_debt_risk(
 
     score = round_score(score)
 
+    breakdown = [
+        make_score_component(
+            "부채상환 부담",
+            score,
+            25,
+            "debt_service_rate",
+            rate,
+            "%",
+            f"월 대출상환액이 소득의 {rate:.1f}%여서 위험점수 "
+            f"{score:.2f}점이 추가되었습니다.",
+        ),
+    ]
+
     reasons = []
 
     if rate >= 40:
@@ -388,6 +449,8 @@ def calculate_debt_risk(
         "score": score,
         "max_score": 25,
         "level": get_domain_level(score, 25),
+        "explanation": f"부채상환비율 {rate:.1f}%를 기준으로 부채 위험 {score:.2f}점이 산정되었습니다.",
+        "breakdown": breakdown,
         "reasons": reasons,
         "metrics": {
             "debt_service_rate": round(rate, 2),
@@ -435,6 +498,37 @@ def calculate_saving_risk(
         saving_rate_score + sustainability_score
     )
 
+    sustainability_value = (
+        0.0 if saving_to_surplus == float("inf") else saving_to_surplus * 100
+    )
+    breakdown = [
+        make_score_component(
+            "저축률 부족",
+            saving_rate_score,
+            14,
+            "saving_rate",
+            saving_rate,
+            "%",
+            f"월 저축액이 소득의 {saving_rate:.1f}%여서 위험점수 "
+            f"{saving_rate_score:.2f}점이 추가되었습니다.",
+        ),
+        make_score_component(
+            "저축 지속가능성",
+            sustainability_score,
+            6,
+            "saving_to_surplus_ratio",
+            sustainability_value,
+            "%",
+            (
+                "필수지출 후 저축 가능한 금액이 없어 현재 저축을 지속하기 어렵기 때문에 "
+                f"위험점수 {sustainability_score:.2f}점이 추가되었습니다."
+                if available_for_saving <= 0
+                else f"저축액이 필수지출 후 가용금액의 {sustainability_value:.1f}%여서 "
+                f"위험점수 {sustainability_score:.2f}점이 추가되었습니다."
+            ),
+        ),
+    ]
+
     reasons = []
 
     if saving_rate < 10:
@@ -464,6 +558,8 @@ def calculate_saving_risk(
         "score": score,
         "max_score": 20,
         "level": get_domain_level(score, 20),
+        "explanation": f"저축률 {saving_rate_score:.2f}점 + 지속가능성 {sustainability_score:.2f}점 = 저축 위험 {score:.2f}점입니다.",
+        "breakdown": breakdown,
         "reasons": reasons,
         "metrics": {
             "saving_rate": round(saving_rate, 2),
@@ -498,6 +594,19 @@ def calculate_emergency_risk(
 
     score = round_score(score)
 
+    breakdown = [
+        make_score_component(
+            "비상자금 보유기간",
+            score,
+            15,
+            "emergency_months",
+            months,
+            "개월",
+            f"현재 비상자금으로 필수지출을 {months:.1f}개월 감당할 수 있어 "
+            f"위험점수 {score:.2f}점이 추가되었습니다.",
+        ),
+    ]
+
     reasons = []
 
     if months < 1:
@@ -519,6 +628,8 @@ def calculate_emergency_risk(
         "score": score,
         "max_score": 15,
         "level": get_domain_level(score, 15),
+        "explanation": f"비상자금 보유기간 {months:.1f}개월을 기준으로 비상자금 위험 {score:.2f}점이 산정되었습니다.",
+        "breakdown": breakdown,
         "reasons": reasons,
         "metrics": {
             "emergency_months": round(months, 2),
@@ -564,6 +675,29 @@ def calculate_expense_structure_risk(
 
     score = round_score(fixed_score + variable_score)
 
+    breakdown = [
+        make_score_component(
+            "고정지출 부담",
+            fixed_score,
+            7,
+            "fixed_expense_rate",
+            fixed_rate,
+            "%",
+            f"고정지출이 소득의 {fixed_rate:.1f}%여서 위험점수 "
+            f"{fixed_score:.2f}점이 추가되었습니다.",
+        ),
+        make_score_component(
+            "변동지출 부담",
+            variable_score,
+            3,
+            "variable_expense_rate",
+            variable_rate,
+            "%",
+            f"변동지출이 소득의 {variable_rate:.1f}%여서 위험점수 "
+            f"{variable_score:.2f}점이 추가되었습니다.",
+        ),
+    ]
+
     reasons = []
 
     if fixed_rate >= 50:
@@ -586,6 +720,8 @@ def calculate_expense_structure_risk(
         "score": score,
         "max_score": 10,
         "level": get_domain_level(score, 10),
+        "explanation": f"고정지출 {fixed_score:.2f}점 + 변동지출 {variable_score:.2f}점 = 지출구조 위험 {score:.2f}점입니다.",
+        "breakdown": breakdown,
         "reasons": reasons,
         "metrics": {
             "fixed_expense_rate": round(fixed_rate, 2),
@@ -667,6 +803,21 @@ def calculate_interaction_adjustment(
     return {
         "score": round(adjustment, 2),
         "max_score": MAX_INTERACTION_ADJUSTMENT,
+        "explanation": (
+            f"여러 위험이 동시에 나타나 추가 위험점수 {adjustment:.2f}점이 반영되었습니다."
+            if adjustment > 0
+            else "동시에 발생한 복합 위험요인이 없어 추가 점수가 없습니다."
+        ),
+        "breakdown": [
+            {
+                "name": reason["code"],
+                "score": reason["severity"],
+                "max_score": reason["severity"],
+                "health_deduction": reason["severity"],
+                "explanation": reason["message"],
+            }
+            for reason in reasons
+        ],
         "reasons": reasons,
     }
 
@@ -755,4 +906,24 @@ def calculate_risk(metrics):
         "score": final_score,
         "level": get_risk_level(final_score),
         "reasons": reasons,
+        "domains": {
+            "cashflow": cashflow,
+            "debt": debt,
+            "saving": saving,
+            "emergency": emergency,
+            "expense_structure": expense_structure,
+        },
+        "score_breakdown": {
+            "base_score": round(base_score, 2),
+            "interaction_score": round(interaction["score"], 2),
+            "applied_interaction_score": round(applied_adjustment, 2),
+            "final_risk_score": final_score,
+            "health_score": round(100 - final_score, 2),
+            "explanation": (
+                f"영역별 위험점수 합계 {base_score:.2f}점에 복합위험 "
+                f"{applied_adjustment:.2f}점을 더해 최종 위험점수는 "
+                f"{final_score:.2f}점입니다. 건강점수에서는 같은 점수만큼 차감됩니다."
+            ),
+        },
+        "interaction": interaction,
     }
