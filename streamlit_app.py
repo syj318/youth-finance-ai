@@ -276,6 +276,63 @@ if st.session_state.get("analyzed", False):
         st.write(
             "현재 주요 금융 위험요인이 발견되지 않았습니다."
         )
+    
+        st.subheader("영역별 위험점수")
+
+    domain_labels = {
+        "cashflow": "현금흐름",
+        "debt": "부채",
+        "saving": "저축",
+        "emergency": "비상자금",
+        "expense_structure": "지출 구조",
+    }
+
+    for domain_key, domain in risk["domains"].items():
+        domain_name = domain_labels.get(domain_key, domain_key)
+
+        with st.expander(
+            f"{domain_name}: {domain['score']:.2f} / "
+            f"{domain['max_score']:.0f}점 · {domain['level']}"
+        ):
+            st.write(domain["explanation"])
+
+            for component in domain["breakdown"]:
+                st.markdown(
+                    f"**{component['name']}**: "
+                    f"+{component['score']:.2f}점 "
+                    f"/ 최대 {component['max_score']:.0f}점"
+                )
+                st.caption(component["explanation"])
+
+    st.caption(
+        "※ 영역별 점수는 위험점수입니다. "
+        "위험점수가 높을수록 금융 건강점수에서 더 많이 차감됩니다."
+    )
+
+    st.subheader("최종 점수 산정 근거")
+
+    breakdown = risk["score_breakdown"]
+
+    score_base_col, score_interaction_col, score_health_col = st.columns(3)
+
+    score_base_col.metric(
+        "영역별 위험 합계",
+        f"{breakdown['base_score']:.2f}점"
+    )
+
+    score_interaction_col.metric(
+        "복합위험 추가점수",
+        f"+{breakdown['applied_interaction_score']:.2f}점"
+    )
+
+    score_health_col.metric(
+        "최종 건강점수",
+        f"{breakdown['health_score']:.2f}점"
+    )
+
+    st.info(
+        breakdown["explanation"]
+    )
 
     st.header("4. 12개월 금융상태 전망")
 
@@ -323,6 +380,15 @@ if st.session_state.get("analyzed", False):
         format="%d원"
     )
 
+    extra_savings = st.slider(
+        "월 추가 저축하기",
+        min_value=0,
+        max_value=1000000,
+        value=0,
+        step=50000,
+        format="%d원"
+    )
+
     new_income = income + income_increase
 
     actual_expense_reduction = min(
@@ -338,7 +404,29 @@ if st.session_state.get("analyzed", False):
         monthly_savings
         + actual_expense_reduction
         + income_increase
+        + extra_savings
     )
+
+    new_monthly_outflow = (
+        fixed_expense
+        + new_living_expense
+        + debt_payment
+        + new_monthly_savings
+    )
+
+    new_expected_balance = new_income - new_monthly_outflow
+
+    if new_expected_balance < 0:
+        st.warning(
+            f"⚠️ 이 계획은 매월 "
+            f"{abs(new_expected_balance):,.0f}원이 부족합니다. "
+            "추가 저축액이나 지출 계획을 조정해보세요."
+        )
+    else:
+        st.success(
+            f"✅ 이 계획을 적용해도 매월 "
+            f"{new_expected_balance:,.0f}원의 여유자금이 남습니다."
+        )
 
     new_metrics = calculate_metrics(
         new_income,
@@ -362,6 +450,25 @@ if st.session_state.get("analyzed", False):
     new_final_asset = new_forecast.iloc[-1]["asset"]
 
     st.subheader("시뮬레이션 결과")
+
+    score_col1, score_col2, score_col3 = st.columns(3)
+
+    score_col1.metric(
+        "현재 금융 건강점수",
+        f"{health_score:.1f}점"
+    )
+
+    score_col2.metric(
+        "예상 금융 건강점수",
+        f"{new_health_score:.1f}점",
+        delta=f"{new_health_score - health_score:.1f}점"
+    )
+
+    score_col3.metric(
+        "변경 후 월 저축",
+        f"{new_monthly_savings:,.0f}원",
+        delta=f"{new_monthly_savings - monthly_savings:,.0f}원"
+    )
 
     before_col, after_col = st.columns(2)
 
