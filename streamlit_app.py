@@ -638,6 +638,53 @@ if st.session_state.get("analyzed", False):
                     f"**{monthly_savings:,.0f}원 → "
                     f"{plan['new_monthly_savings']:,.0f}원**으로 변경됩니다."
                 )
+
+                st.markdown("#### 📈 12개월 자산 전망 비교")
+
+                plan_forecast = forecast_assets(
+                    savings,
+                    plan["new_monthly_savings"],
+                    months=12
+                )
+
+                plan_comparison = forecast.copy()
+
+                plan_comparison = plan_comparison.rename(
+                    columns={
+                        "asset": "현재 예상자산"
+                    }
+                )
+
+                plan_comparison["개선안 적용 후"] = plan_forecast["asset"]
+
+                st.line_chart(
+                    plan_comparison,
+                    x="month",
+                    y=[
+                        "현재 예상자산",
+                        "개선안 적용 후"
+                    ]
+                )
+
+                current_12m_asset = forecast.iloc[-1]["asset"]
+                improved_12m_asset = plan_forecast.iloc[-1]["asset"]
+
+                asset_col1, asset_col2, asset_col3 = st.columns(3)
+
+                asset_col1.metric(
+                    "현재 12개월 후 자산",
+                    f"{current_12m_asset:,.0f}원"
+                )
+
+                asset_col2.metric(
+                    "개선 후 12개월 자산",
+                    f"{improved_12m_asset:,.0f}원"
+                )
+
+                asset_col3.metric(
+                    "12개월 자산 증가",
+                    f"{improved_12m_asset - current_12m_asset:,.0f}원"
+                )
 st.divider()
 
 st.caption(
