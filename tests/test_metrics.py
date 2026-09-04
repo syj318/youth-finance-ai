@@ -30,6 +30,20 @@ class CalculateMetricsTests(unittest.TestCase):
         self.assertEqual(metrics["debt_service_rate"], 0)
         self.assertEqual(metrics["emergency_months"], 0)
 
+    def test_expenses_greater_than_income_produce_negative_surplus(self):
+        metrics = calculate_metrics(
+            income=2_000_000,
+            fixed_expense=1_200_000,
+            living_expense=700_000,
+            debt_payment=300_000,
+            monthly_savings=0,
+            savings=0,
+        )
+
+        self.assertEqual(metrics["total_expense"], 2_200_000)
+        self.assertEqual(metrics["monthly_surplus"], -200_000)
+        self.assertAlmostEqual(metrics["surplus_rate"], -10.0)
+
     def test_zero_essential_outflow_returns_zero_emergency_months(self):
         metrics = calculate_metrics(3_000_000, 0, 0, 0, 500_000, 2_000_000)
 
