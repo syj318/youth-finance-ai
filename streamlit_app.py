@@ -4,6 +4,7 @@ from src.metrics import calculate_metrics
 from src.risk_engine import calculate_risk
 from src.forecast import forecast_assets
 from src.optimizer import find_improvement_plans
+from src.ai_advisor import generate_ai_advice
 
 st.set_page_config(
     page_title="청년 금융 AI",
@@ -685,6 +686,39 @@ if st.session_state.get("analyzed", False):
                     "12개월 자산 증가",
                     f"{improved_12m_asset - current_12m_asset:,.0f}원"
                 )
+
+    st.header("7. 🤖 AI 금융코치")
+
+    st.write(
+        "금융 진단 결과와 자동 개선안을 바탕으로 "
+        "현재 상태와 우선 행동을 이해하기 쉽게 설명합니다."
+    )
+
+    advice = generate_ai_advice(
+        metrics,
+        risk,
+        plans
+    )
+
+    st.subheader("📋 현재 금융상태 요약")
+    st.info(advice["summary"])
+
+    st.subheader("🎯 가장 먼저 점검할 부분")
+    st.warning(advice["priority"])
+
+    st.subheader("✅ 추천 행동")
+
+    for index, action in enumerate(advice["actions"], start=1):
+        st.write(f"**{index}.** {action}")
+
+    st.subheader("💬 개선안 코멘트")
+    st.success(advice["plan_comment"])
+
+    st.caption(
+        "※ 금융코치는 기존 금융 진단 및 최적화 결과를 설명하며, "
+        "별도의 투자·대출·금융상품 가입 판단을 수행하지 않습니다."
+    )
+
 st.divider()
 
 st.caption(
