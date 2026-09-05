@@ -82,6 +82,35 @@ class HealthForecastTests(unittest.TestCase):
         )
         self.assertEqual(len(result), 4)
 
+    def test_monthly_deficit_depletes_projected_savings(self):
+        inputs = {
+            "income": 2_500_000,
+            "fixed_expense": 1_300_000,
+            "living_expense": 900_000,
+            "debt_payment": 700_000,
+            "monthly_savings": 0,
+            "savings": 500_000,
+        }
+
+        result = forecast_financial_health(**inputs, months=(0, 1, 2, 3, 6, 12))
+
+        self.assertEqual(
+            [item["projected_savings"] for item in result],
+            [500_000, 100_000, 0, 0, 0, 0],
+        )
+
+    def test_savings_contribution_is_reduced_by_cashflow_shortfall(self):
+        inputs = dict(
+            self.inputs,
+            income=2_800_000,
+            monthly_savings=300_000,
+            savings=500_000,
+        )
+
+        result = forecast_financial_health(**inputs, months=(1,))[0]
+
+        self.assertEqual(result["projected_savings"], 700_000)
+
     def test_stable_inputs_do_not_raise(self):
         result = forecast_financial_health(
             income=4_000_000,

@@ -41,9 +41,22 @@ def _project_health(
     savings,
     months,
 ) -> list[dict[str, Any]]:
+    current_metrics = calculate_metrics(
+        income,
+        fixed_expense,
+        living_expense,
+        debt_payment,
+        monthly_savings,
+        savings,
+    )
+    monthly_asset_change = monthly_savings + min(
+        0,
+        current_metrics["monthly_surplus"],
+    )
+
     results = []
     for month in _validate_months(months):
-        projected_savings = max(0, savings + monthly_savings * month)
+        projected_savings = max(0, savings + monthly_asset_change * month)
         projected_metrics = calculate_metrics(
             income,
             fixed_expense,
