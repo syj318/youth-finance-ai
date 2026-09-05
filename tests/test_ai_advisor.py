@@ -73,6 +73,35 @@ class AiAdvisorTests(unittest.TestCase):
         self.assertNotIn("52.5", advice["summary"])
         self.assertNotIn("금융 건강점수", advice["summary"])
 
+    def test_does_not_append_copula_to_complete_reason_sentence(self):
+        advice = generate_ai_advice(self.metrics, self.risk, self.plans)
+
+        self.assertIn(
+            "주요 진단 사유는 다음과 같습니다. 현금흐름 여유가 적습니다.",
+            advice["summary"],
+        )
+        self.assertNotIn("적습니다.입니다.", advice["summary"])
+
+    def test_formats_multiple_complete_reasons_without_semicolons(self):
+        risk = dict(self.risk)
+        risk["reasons"] = [
+            "지출과 저축 후 남는 비상 여유자금이 적어 예상치 못한 지출에 취약합니다.;",
+            "소득 대비 생활지출 부담이 높은 편입니다.;",
+            "비상자금이 1개월 미만 수준으로 예상치 못한 지출에 취약합니다.",
+        ]
+
+        summary = generate_ai_advice(self.metrics, risk, self.plans)["summary"]
+
+        self.assertNotIn(".;", summary)
+        self.assertNotIn(".입니다.", summary)
+        self.assertIn(
+            "주요 진단 사유는 다음과 같습니다. "
+            "지출과 저축 후 남는 비상 여유자금이 적어 예상치 못한 지출에 취약합니다. "
+            "소득 대비 생활지출 부담이 높은 편입니다. "
+            "비상자금이 1개월 미만 수준으로 예상치 못한 지출에 취약합니다.",
+            summary,
+        )
+
     def test_fallback_handles_missing_or_invalid_inputs(self):
         advice = generate_ai_advice(None, None, None)
 
