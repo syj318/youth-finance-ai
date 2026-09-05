@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -7,6 +8,10 @@ from src.metrics import calculate_metrics
 from src.risk_engine import calculate_risk
 from src.forecast import forecast_assets
 from src.optimizer import find_improvement_plans
+from src.health_forecast import (
+    forecast_financial_health,
+    forecast_plan_health,
+)
 from src.ai_advisor import generate_ai_advice, generate_ai_chat_reply
 
 st.set_page_config(
@@ -339,21 +344,130 @@ if st.session_state.get("analyzed", False):
         breakdown["explanation"]
     )
 
-    st.header("4. 12개월 금융상태 전망")
+    st.header("4. 📈 미래 금융건강 전망")
 
+    st.write(
+        "현재의 소득·지출·저축 행동이 계속된다고 가정했을 때 "
+        "3개월, 6개월, 12개월 후 금융상태를 전망합니다."
+    )
+
+    health_forecast = forecast_financial_health(
+        income=income,
+        fixed_expense=fixed_expense,
+        living_expense=living_expense,
+        debt_payment=debt_payment,
+        monthly_savings=monthly_savings,
+        savings=savings,
+        months=(0, 3, 6, 12),
+    )
+
+    health_forecast_df = pd.DataFrame(health_forecast)
+
+    # 화면 표시용 시점 이름
+    health_forecast_df["시점"] = health_forecast_df["month"].map(
+        {
+            0: "현재",
+            3: "3개월",
+            6: "6개월",
+            12: "12개월",
+        }
+    )
+
+    st.subheader("금융건강 변화")
+
+    forecast_col1, forecast_col2, forecast_col3, forecast_col4 = st.columns(4)
+
+    forecast_columns = [
+        forecast_col1,
+        forecast_col2,
+        forecast_col3,
+        forecast_col4,
+    ]
+
+    for column, row in zip(
+        forecast_columns,
+        health_forecast_df.to_dict("records"),
+    ):
+        with column:
+            st.markdown(f"### {row['시점']}")
+
+            st.metric(
+                "금융 건강점수",
+                f"{row['health_score']:.1f}점"
+            )
+
+            st.metric(
+                "위험점수",
+                f"{row['risk_score']:.1f}점"
+            )
+
+            st.write(
+                f"**위험등급:** {row['risk_level']}"
+            )
+
+            st.write(
+                f"**비상자금:** {row['emergency_months']:.1f}개월"
+            )
+
+            st.write(
+                f"**예상 저축액:** {row['projected_savings']:,.0f}원"
+            )
+
+    st.subheader("📊 금융 건강점수 변화")
+
+    health_chart_df = health_forecast_df[
+        ["month", "health_score"]
+    ].rename(
+        columns={
+            "health_score": "금융 건강점수"
+        }
+    )
+
+    st.line_chart(
+        health_chart_df,
+        x="month",
+        y="금융 건강점수"
+    )
+
+    st.caption("0개월 = 현재")
+
+    st.subheader("⚠️ 위험점수 변화")
+
+    risk_chart_df = health_forecast_df[
+        ["month", "risk_score"]
+    ].rename(
+        columns={
+            "risk_score": "금융 위험점수"
+        }
+    )
+
+    st.line_chart(
+        risk_chart_df,
+        x="month",
+        y="금융 위험점수"
+    )
+
+    st.caption(
+        "※ 본 전망은 현재의 소득·지출·저축 행동이 동일하게 유지된다는 "
+        "가정에 따른 시나리오 분석이며, ML 기반 미래 예측값은 아닙니다."
+    )
+
+    # 기존 12개월 자산 전망도 유지
     forecast = forecast_assets(
         savings,
         monthly_savings,
         months=12
     )
 
+    final_asset = forecast.iloc[-1]["asset"]
+
+    st.subheader("💰 12개월 금융자산 전망")
+
     st.line_chart(
         forecast,
         x="month",
         y="asset"
     )
-
-    final_asset = forecast.iloc[-1]["asset"]
 
     st.metric(
         "12개월 후 예상 금융자산",
@@ -689,6 +803,72 @@ if st.session_state.get("analyzed", False):
                 asset_col3.metric(
                     "12개월 자산 증가",
                     f"{improved_12m_asset - current_12m_asset:,.0f}원"
+                )
+
+                st.markdown("#### 📊 금융 건강점수 미래 비교")
+
+                plan_health_forecast = forecast_plan_health(
+                    income=income,
+                    fixed_expense=fixed_expense,
+                    living_expense=living_expense,
+                    debt_payment=debt_payment,
+                    monthly_savings=monthly_savings,
+                    savings=savings,
+                    plan=plan,
+                    months=(0, 3, 6, 12),
+                )
+
+                plan_health_df = pd.DataFrame(plan_health_forecast)
+
+                health_comparison = health_forecast_df[
+                    ["month", "health_score"]
+                ].rename(
+                    columns={
+                        "health_score": "현재 행동 유지"
+                    }
+                )
+
+                health_comparison["개선안 적용"] = (
+                    plan_health_df["health_score"]
+                )
+
+                health_comparison["시점"] = health_comparison["month"].map(
+                    {
+                        0: "현재",
+                        3: "3개월",
+                        6: "6개월",
+                        12: "12개월",
+                    }
+                )
+
+                st.line_chart(
+                    health_comparison,
+                    x="month",
+                    y=[
+                        "현재 행동 유지",
+                        "개선안 적용",
+                    ],
+                )
+
+                current_12m_health = health_comparison.iloc[-1][
+                    "현재 행동 유지"
+                ]
+
+                improved_12m_health = health_comparison.iloc[-1][
+                    "개선안 적용"
+                ]
+
+                health_compare_col1, health_compare_col2 = st.columns(2)
+
+                health_compare_col1.metric(
+                    "현재 행동 유지 시 12개월 건강점수",
+                    f"{current_12m_health:.1f}점"
+                )
+
+                health_compare_col2.metric(
+                    "개선안 적용 시 12개월 건강점수",
+                    f"{improved_12m_health:.1f}점",
+                    delta=f"{improved_12m_health - current_12m_health:+.1f}점"
                 )
 
     st.header("7. 🤖 AI 금융코치")
