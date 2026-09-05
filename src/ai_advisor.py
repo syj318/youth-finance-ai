@@ -341,11 +341,12 @@ def _call_groq(messages: List[Dict[str, str]], response_schema=None) -> str:
     """Groq SDK를 지연 import하여 API 미설치 환경의 fallback도 보장한다."""
     from groq import Groq
 
-    client = Groq(api_key=os.environ["GROQ_API_KEY"], timeout=15.0)
+    client = Groq(api_key=os.environ["GROQ_API_KEY"], timeout=8.0)
     request = {
         "model": os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL),
         "messages": messages,
         "reasoning_effort": "low",
+        "max_completion_tokens": 250,
     }
     if response_schema is not None:
         request["response_format"] = {
@@ -482,20 +483,14 @@ def generate_ai_advice(metrics, risk, plans) -> Dict[str, Any]:
     ]
     try:
         advice = json.loads(_call_groq(messages, ADVICE_SCHEMA))
-        
         if not _valid_advice(advice):
             return fallback
-        
         if not _uses_only_context_numbers(
             json.dumps(advice, ensure_ascii=False),
             context
         ):
             return fallback
-        
-        advice["priority"] = _priority(
-            risk if isinstance(risk, Mapping) else {}
-        )
-        
+        advice["priority"] = _priority(risk if isinstance(risk, Mapping) else {})
         return advice
         
     except Exception:
@@ -514,14 +509,14 @@ def _safe_chat_history(chat_history) -> List[Dict[str, str]]:
     if not isinstance(chat_history, list):
         return []
     safe_history = []
-    for message in chat_history[-10:]:
+    for message in chat_history[-4:]:
         if not isinstance(message, Mapping):
             continue
         role = message.get("role")
         content = message.get("content")
         if role in ("user", "assistant") and isinstance(content, str) and content.strip():
             safe_history.append(
-                {"role": role, "content": _redact_personal_information(content[:4000])}
+                {"role": role, "content": _redact_personal_information(content[:1500])}
             )
     return safe_history
 
@@ -598,7 +593,7 @@ def generate_ai_chat_reply(
             ],
         }
 
-        # 첫 응답의 숫자 검증 실패 시 한 번 재시도
+        # 첫 응답에 근거 없는 숫자가 포함되면 한 번만 재시도
         if not _uses_only_context_numbers(
             reply,
             grounded_context
@@ -607,11 +602,11 @@ def generate_ai_chat_reply(
                 *messages,
                 {
                     "role": "assistant",
-                    "content": reply
+                    "content": reply,
                 },
                 {
                     "role": "system",
-                    "content": CHAT_GROUNDING_RETRY_PROMPT
+                    "content": CHAT_GROUNDING_RETRY_PROMPT,
                 },
             ]
 
@@ -619,7 +614,7 @@ def generate_ai_chat_reply(
                 retry_messages
             )
 
-            # 재시도까지 실패하면 fallback
+            # 재시도까지 근거 검증에 실패하면 안전한 fallback 사용
             if not _uses_only_context_numbers(
                 retry_reply,
                 grounded_context
