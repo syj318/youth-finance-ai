@@ -1,12 +1,14 @@
-"""기존 금융 진단 결과를 사용자가 이해하기 쉬운 문장으로 설명한다.
+"""검증된 금융 진단 결과를 Groq LLM 또는 fallback으로 설명한다.
 
-이 모듈은 점수나 위험등급을 계산하지 않는다. 외부 AI API가 없어도 동작하도록
-결정적인(deterministic) 설명을 생성하며, 전달받은 metrics/risk/plans의 값만
-문장에 사용한다.
+이 모듈은 점수나 위험등급을 계산하지 않는다. LLM에는 허용된 엔진 결과만
+전달하며, API 키가 없거나 호출이 실패하면 결정적인 설명을 반환한다.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import re
 from typing import Any, Dict, Iterable, List, Mapping
 
 
@@ -16,6 +18,60 @@ DOMAIN_LABELS = {
     "saving": "저축",
     "emergency": "비상자금",
     "expense_structure": "지출 구조",
+}
+
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
+METRIC_CONTEXT_FIELDS = (
+    "monthly_surplus",
+    "savings_rate",
+    "debt_service_rate",
+    "emergency_months",
+)
+PLAN_CONTEXT_FIELDS = (
+    "name",
+    "living_expense_reduction",
+    "income_increase",
+    "extra_savings",
+    "new_monthly_savings",
+    "risk_score",
+    "health_score",
+    "risk_level",
+    "risk_reduction",
+    "new_monthly_surplus",
+    "change_count",
+)
+
+SYSTEM_PROMPT = """당신은 청년 사용자의 금융상태를 설명하는 AI 금융코치입니다.
+
+금융 건강점수, 위험점수, 위험등급 및 자동 개선안은 이미 검증 가능한 금융 엔진에서 계산되었습니다.
+제공된 데이터의 숫자를 임의로 변경하거나 새로운 금융 수치를 만들지 마세요.
+metrics, risk, plans에 존재하는 정보만 근거로 답변하세요.
+숫자는 제공된 표기를 그대로 사용하고 단위 변환이나 반올림도 하지 마세요.
+제공되지 않은 금리, 신용점수, 금융상품, 예상 수익률, 정책 자격조건을 추측하지 마세요.
+현재 금융상태의 중요한 문제와 optimizer가 산출한 행동을 이해하기 쉽게 설명하세요.
+특정 주식·코인 매수/매도, 대출 또는 금융상품 가입을 직접 권유하지 마세요.
+데이터에 없는 내용은 현재 제공된 정보만으로 판단할 수 없다고 설명하세요.
+한국어로 자연스럽고 구체적이되 간결하게 답변하세요."""
+
+ADVICE_SCHEMA = {
+    "name": "financial_advice",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "priority": {"type": "string"},
+            "actions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 3,
+                "maxItems": 3,
+            },
+            "plan_comment": {"type": "string"},
+        },
+        "required": ["summary", "priority", "actions", "plan_comment"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -157,12 +213,8 @@ def _plan_comment(plans: List[Any]) -> str:
     return f"자동 개선안 중 '{name}'에 제시된 실행 항목을 기준으로 검토하세요."
 
 
-def generate_ai_advice(metrics, risk, plans) -> Dict[str, Any]:
-    """엔진과 최적화 결과만 인용해 UI용 금융 코치 설명을 반환한다.
-
-    외부 API를 호출하지 않으므로 네트워크나 API 키가 없는 환경에서도 동일하게
-    동작한다. 입력이 일부 비어 있어도 가능한 범위에서 안전한 fallback 문구를 낸다.
-    """
+def _generate_fallback_advice(metrics, risk, plans) -> Dict[str, Any]:
+    """엔진 결과만 인용하는 기존 deterministic 설명을 반환한다."""
     safe_metrics = metrics if isinstance(metrics, Mapping) else {}
     safe_risk = risk if isinstance(risk, Mapping) else {}
     safe_plans = plans if isinstance(plans, list) else []
@@ -193,3 +245,246 @@ def generate_ai_advice(metrics, risk, plans) -> Dict[str, Any]:
         "actions": _actions(safe_risk, safe_plans),
         "plan_comment": _plan_comment(safe_plans),
     }
+
+
+def _copy_reason(reason: Any) -> Any:
+    if isinstance(reason, str):
+        return reason
+    if not isinstance(reason, Mapping):
+        return None
+    return {
+        key: reason[key]
+        for key in ("code", "severity", "message", "recommendation")
+        if key in reason
+    }
+
+
+def _build_financial_context(metrics, risk, plans) -> Dict[str, Any]:
+    """LLM에 전달할 엔진 결과를 명시적인 allowlist로 제한한다."""
+    safe_metrics = metrics if isinstance(metrics, Mapping) else {}
+    safe_risk = risk if isinstance(risk, Mapping) else {}
+    safe_plans = plans if isinstance(plans, list) else []
+
+    metric_context = {
+        key: safe_metrics[key] for key in METRIC_CONTEXT_FIELDS if key in safe_metrics
+    }
+
+    domain_context = {}
+    domains = safe_risk.get("domains", {})
+    if isinstance(domains, Mapping):
+        for name, domain in domains.items():
+            if not isinstance(domain, Mapping):
+                continue
+            item = {
+                key: domain[key]
+                for key in ("score", "max_score", "level", "explanation")
+                if key in domain
+            }
+            reasons = domain.get("reasons")
+            if isinstance(reasons, list):
+                item["reasons"] = [
+                    copied for reason in reasons if (copied := _copy_reason(reason)) is not None
+                ]
+            domain_context[str(name)] = item
+
+    risk_context = {
+        key: safe_risk[key] for key in ("score", "level") if key in safe_risk
+    }
+    reasons = safe_risk.get("reasons")
+    if isinstance(reasons, list):
+        risk_context["reasons"] = [
+            copied for reason in reasons if (copied := _copy_reason(reason)) is not None
+        ]
+    risk_context["domains"] = domain_context
+    health_score = _health_score(safe_metrics, safe_risk)
+    if health_score is not None:
+        risk_context["health_score"] = health_score
+
+    plan_context = [
+        {key: plan[key] for key in PLAN_CONTEXT_FIELDS if key in plan}
+        for plan in safe_plans
+        if isinstance(plan, Mapping)
+    ]
+    return {"metrics": metric_context, "risk": risk_context, "plans": plan_context}
+
+
+def _call_groq(messages: List[Dict[str, str]], response_schema=None) -> str:
+    """Groq SDK를 지연 import하여 API 미설치 환경의 fallback도 보장한다."""
+    from groq import Groq
+
+    client = Groq(api_key=os.environ["GROQ_API_KEY"], timeout=15.0)
+    request = {
+        "model": os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL),
+        "messages": messages,
+        "reasoning_effort": "low",
+    }
+    if response_schema is not None:
+        request["response_format"] = {
+            "type": "json_schema",
+            "json_schema": response_schema,
+        }
+    completion = client.chat.completions.create(**request)
+    content = completion.choices[0].message.content
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("Groq가 빈 응답을 반환했습니다.")
+    return content.strip()
+
+
+def _valid_advice(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"summary", "priority", "actions", "plan_comment"}
+        and isinstance(value["summary"], str) and bool(value["summary"].strip())
+        and isinstance(value["priority"], str) and bool(value["priority"].strip())
+        and isinstance(value["plan_comment"], str) and bool(value["plan_comment"].strip())
+        and isinstance(value["actions"], list)
+        and len(value["actions"]) == 3
+        and all(isinstance(action, str) and action.strip() for action in value["actions"])
+    )
+
+
+def _uses_only_context_numbers(text: str, context: Mapping[str, Any]) -> bool:
+    """LLM 출력의 숫자가 제공된 컨텍스트에 실제로 존재하는지 확인한다."""
+    number_pattern = r"(?<![\d.])[-+]?\d+(?:\.\d+)?(?![\d.])"
+    allowed = set(re.findall(number_pattern, json.dumps(context, ensure_ascii=False)))
+    return set(re.findall(number_pattern, text)).issubset(allowed)
+
+
+def _redact_personal_information(text: str) -> str:
+    """질문/대화 이력의 대표적인 개인식별정보 형식을 LLM 전송 전에 가린다."""
+    patterns = (
+        r"(?<!\d)\d{6}-?\d{7}(?!\d)",  # 주민등록번호
+        r"(?<!\d)01[016789][ -]?\d{3,4}[ -]?\d{4}(?!\d)",  # 휴대전화 번호
+        r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b",  # 이메일
+        r"(?<!\d)\d{2,6}[ -]\d{2,6}[ -]\d{2,6}(?!\d)",  # 일반적인 계좌번호 형식
+    )
+    redacted = text
+    for pattern in patterns:
+        redacted = re.sub(pattern, "[개인정보 삭제]", redacted)
+    return redacted
+
+
+def _is_out_of_scope_question(question: str) -> bool:
+    blocked_terms = (
+        "삼성전자",
+        "주식",
+        "종목",
+        "코인",
+        "비트코인",
+        "매수",
+        "매도",
+        "대출상품",
+        "대출 상품",
+        "대출을 받아",
+        "적금",
+        "예금",
+        "금리",
+        "신용점수",
+    )
+    return any(term in question for term in blocked_terms)
+
+
+def generate_ai_advice(metrics, risk, plans) -> Dict[str, Any]:
+    """Groq 사용 가능 시 개인화 설명을, 아니면 기존 fallback을 반환한다."""
+    fallback = _generate_fallback_advice(metrics, risk, plans)
+    if not os.getenv("GROQ_API_KEY"):
+        return fallback
+
+    context = _build_financial_context(metrics, risk, plans)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "다음 금융 엔진 결과만 사용해 지정된 JSON 형식의 금융 코칭을 작성하세요. "
+                "actions는 정확히 3개의 문자열이어야 합니다.\n"
+                + json.dumps(context, ensure_ascii=False)
+            ),
+        },
+    ]
+    try:
+        advice = json.loads(_call_groq(messages, ADVICE_SCHEMA))
+        if not _valid_advice(advice):
+            return fallback
+        if not _uses_only_context_numbers(json.dumps(advice, ensure_ascii=False), context):
+            return fallback
+        return advice
+    except Exception:
+        return fallback
+
+
+def _generate_fallback_chat_reply(question, metrics, risk, plans) -> str:
+    advice = _generate_fallback_advice(metrics, risk, plans)
+    return (
+        "현재 AI 연결을 일시적으로 사용할 수 없어 기존 금융 진단 결과를 기준으로 "
+        f"안내합니다. {advice['summary']} {advice['priority']}"
+    )
+
+
+def _safe_chat_history(chat_history) -> List[Dict[str, str]]:
+    if not isinstance(chat_history, list):
+        return []
+    safe_history = []
+    for message in chat_history[-10:]:
+        if not isinstance(message, Mapping):
+            continue
+        role = message.get("role")
+        content = message.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            safe_history.append(
+                {"role": role, "content": _redact_personal_information(content[:4000])}
+            )
+    return safe_history
+
+
+def generate_ai_chat_reply(
+    question,
+    metrics,
+    risk,
+    plans,
+    chat_history=None,
+) -> str:
+    """현재 금융 엔진 결과에 근거해 사용자의 후속 질문에 답한다."""
+    if not isinstance(question, str) or not question.strip():
+        return "궁금한 금융 진단 내용을 입력해 주세요."
+
+    clean_question = _redact_personal_information(question.strip())
+    if _is_out_of_scope_question(clean_question):
+        return "현재 입력된 금융정보와 분석 결과만으로는 해당 내용을 판단할 수 없습니다."
+
+    fallback = _generate_fallback_chat_reply(question, metrics, risk, plans)
+    if not os.getenv("GROQ_API_KEY"):
+        return fallback
+
+    context = _build_financial_context(metrics, risk, plans)
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(_safe_chat_history(chat_history))
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "금융 엔진 컨텍스트:\n"
+                + json.dumps(context, ensure_ascii=False)
+                + "\n\n사용자 질문:\n"
+                + clean_question
+            ),
+        }
+    )
+    try:
+        reply = _call_groq(messages)
+        grounded_context = {
+            **context,
+            "user_provided_text": [
+                *(
+                    message["content"]
+                    for message in messages[1:-1]
+                    if message["role"] == "user"
+                ),
+                clean_question,
+            ],
+        }
+        if not _uses_only_context_numbers(reply, grounded_context):
+            return fallback
+        return reply
+    except Exception:
+        return fallback
