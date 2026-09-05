@@ -482,16 +482,23 @@ def generate_ai_advice(metrics, risk, plans) -> Dict[str, Any]:
     ]
     try:
         advice = json.loads(_call_groq(messages, ADVICE_SCHEMA))
+        
         if not _valid_advice(advice):
-            logger.warning("Groq 금융 코칭 응답이 스키마 검증에 실패했습니다.")
             return fallback
-        if not _uses_only_context_numbers(json.dumps(advice, ensure_ascii=False), context):
-            logger.warning("Groq 금융 코칭 응답이 숫자 근거 검증에 실패했습니다.")
+        
+        if not _uses_only_context_numbers(
+            json.dumps(advice, ensure_ascii=False),
+            context
+        ):
             return fallback
-        advice["priority"] = _priority(risk if isinstance(risk, Mapping) else {})
+        
+        advice["priority"] = _priority(
+            risk if isinstance(risk, Mapping) else {}
+        )
+        
         return advice
+        
     except Exception:
-        logger.exception("Groq 금융 코칭 생성 중 오류가 발생해 fallback을 사용합니다.")
         return fallback
 
 
@@ -518,7 +525,6 @@ def _safe_chat_history(chat_history) -> List[Dict[str, str]]:
             )
     return safe_history
 
-
 def generate_ai_chat_reply(
     question,
     metrics,
@@ -531,29 +537,55 @@ def generate_ai_chat_reply(
         return "궁금한 금융 진단 내용을 입력해 주세요."
 
     clean_question = _redact_personal_information(question.strip())
+
     if _is_out_of_scope_question(clean_question):
         return "현재 입력된 금융정보와 분석 결과만으로는 해당 내용을 판단할 수 없습니다."
 
-    fallback = _generate_fallback_chat_reply(question, metrics, risk, plans)
+    fallback = _generate_fallback_chat_reply(
+        question,
+        metrics,
+        risk,
+        plans
+    )
+
     if not os.getenv("GROQ_API_KEY"):
         return fallback
 
-    context = _build_financial_context(metrics, risk, plans)
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(_safe_chat_history(chat_history))
+    context = _build_financial_context(
+        metrics,
+        risk,
+        plans
+    )
+
+    messages = [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT
+        }
+    ]
+
+    messages.extend(
+        _safe_chat_history(chat_history)
+    )
+
     messages.append(
         {
             "role": "user",
             "content": (
                 "금융 엔진 컨텍스트:\n"
-                + json.dumps(context, ensure_ascii=False)
+                + json.dumps(
+                    context,
+                    ensure_ascii=False
+                )
                 + "\n\n사용자 질문:\n"
                 + clean_question
             ),
         }
     )
+
     try:
         reply = _call_groq(messages)
+
         grounded_context = {
             **context,
             "user_provided_text": [
@@ -565,19 +597,38 @@ def generate_ai_chat_reply(
                 clean_question,
             ],
         }
-        if not _uses_only_context_numbers(reply, grounded_context):
-            logger.warning("Groq 채팅 응답이 숫자 근거 검증에 실패했습니다.")
+
+        # 첫 응답의 숫자 검증 실패 시 한 번 재시도
+        if not _uses_only_context_numbers(
+            reply,
+            grounded_context
+        ):
             retry_messages = [
                 *messages,
-                {"role": "assistant", "content": reply},
-                {"role": "system", "content": CHAT_GROUNDING_RETRY_PROMPT},
+                {
+                    "role": "assistant",
+                    "content": reply
+                },
+                {
+                    "role": "system",
+                    "content": CHAT_GROUNDING_RETRY_PROMPT
+                },
             ]
-            retry_reply = _call_groq(retry_messages)
-            if not _uses_only_context_numbers(retry_reply, grounded_context):
-                logger.warning("Groq 채팅 재시도 응답도 숫자 근거 검증에 실패했습니다.")
+
+            retry_reply = _call_groq(
+                retry_messages
+            )
+
+            # 재시도까지 실패하면 fallback
+            if not _uses_only_context_numbers(
+                retry_reply,
+                grounded_context
+            ):
                 return fallback
+
             return retry_reply
+
         return reply
+
     except Exception:
-        logger.exception("Groq 채팅 응답 생성 중 오류가 발생해 fallback을 사용합니다.")
         return fallback

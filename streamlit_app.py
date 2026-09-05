@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(".env")
 
 from src.metrics import calculate_metrics
 from src.risk_engine import calculate_risk
@@ -13,12 +13,21 @@ from src.health_forecast import (
     forecast_plan_health,
 )
 from src.ai_advisor import generate_ai_advice, generate_ai_chat_reply
+from src.financial_product_api import fetch_saving_products, fetch_deposit_products
+from src.recommendation_engine import get_personalized_recommendations
 
 st.set_page_config(
     page_title="청년 금융 AI",
     page_icon="💰",
     layout="wide"
 )
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_financial_products():
+    saving_result = fetch_saving_products(timeout=30)
+    deposit_result = fetch_deposit_products(timeout=30)
+
+    return saving_result, deposit_result
 
 
 st.title("💰 청년 금융 건강 AI")
@@ -452,10 +461,14 @@ if st.session_state.get("analyzed", False):
         "가정에 따른 시나리오 분석이며, ML 기반 미래 예측값은 아닙니다."
     )
 
-    # 기존 12개월 자산 전망도 유지
+    current_asset_change = (
+        monthly_savings
+        + min(0, metrics["monthly_surplus"])
+    )
+
     forecast = forecast_assets(
         savings,
-        monthly_savings,
+        current_asset_change,
         months=12
     )
 
@@ -521,8 +534,6 @@ if st.session_state.get("analyzed", False):
 
     new_monthly_savings = (
         monthly_savings
-        + actual_expense_reduction
-        + income_increase
         + extra_savings
     )
 
@@ -560,9 +571,14 @@ if st.session_state.get("analyzed", False):
     new_health_score = max(0,min(100, 100 - new_risk["score"]))
 
 
+    new_asset_change = (
+        new_monthly_savings
+        + min(0, new_metrics["monthly_surplus"])
+    )
+
     new_forecast = forecast_assets(
         savings,
-        new_monthly_savings,
+        new_asset_change,
         months=12
     )
 
@@ -760,9 +776,14 @@ if st.session_state.get("analyzed", False):
 
                 st.markdown("#### 📈 12개월 자산 전망 비교")
 
+                plan_asset_change = (
+                    plan["new_monthly_savings"]
+                    + min(0, plan["new_monthly_surplus"])
+                )
+
                 plan_forecast = forecast_assets(
                     savings,
-                    plan["new_monthly_savings"],
+                    plan_asset_change,
                     months=12
                 )
 
@@ -871,7 +892,194 @@ if st.session_state.get("analyzed", False):
                     delta=f"{improved_12m_health - current_12m_health:+.1f}점"
                 )
 
-    st.header("7. 🤖 AI 금융코치")
+    st.header("7. 🎯 맞춤 금융상품 추천")
+
+    st.write(
+        "현재 금융상태와 위험진단 결과를 바탕으로 "
+        "실제 적금·예금 상품 중 우선 확인할 상품을 추천합니다."
+    )
+
+    with st.spinner("금융감독원 금융상품 정보를 불러오는 중입니다..."):
+        saving_result, deposit_result = load_financial_products()
+
+    saving_products = (
+        saving_result.get("items", [])
+        if saving_result.get("available")
+        else []
+    )
+
+    deposit_products = (
+        deposit_result.get("items", [])
+        if deposit_result.get("available")
+        else []
+    )
+
+    recommendations = get_personalized_recommendations(
+        metrics=metrics,
+        risk=risk,
+        user_profile={},
+        saving_products=saving_products,
+        deposit_products=deposit_products,
+        policies=[],
+        max_products=3,
+        max_policies=0,
+    )
+
+    product_recommendations = recommendations.get(
+        "financial_products",
+        []
+    )
+
+    recommendation_context = recommendations.get(
+        "recommendation_context",
+        {}
+    )
+
+    st.subheader("💰 내 금융상태에 맞는 금융상품 TOP 3")
+
+    product_api_available = (
+        saving_result.get("available")
+        or deposit_result.get("available")
+    )
+
+    if not product_api_available:
+        product_error = (
+            saving_result.get("error_code")
+            or deposit_result.get("error_code")
+            or "API_UNAVAILABLE"
+        )
+
+        st.warning(
+            "현재 금융감독원 금융상품 정보를 불러오지 못했습니다. "
+            f"오류 코드: {product_error}"
+        )
+
+    elif (
+        recommendation_context.get("product_recommendation_status")
+        == "deferred"
+    ):
+        st.info(
+            "현재 월 현금흐름이 적자이므로 금융상품 가입보다 "
+            "월 적자 해소와 현금흐름 개선을 우선하는 것이 적절합니다."
+        )
+
+    elif not product_recommendations:
+        st.info(
+            "현재 조건에서 우선 추천할 금융상품을 찾지 못했습니다."
+        )
+
+    else:
+        for index, item in enumerate(
+            product_recommendations,
+            start=1,
+        ):
+            product = item.get("product", {})
+            score = float(item.get("match_score", 0) or 0)
+
+            company_name = (
+                product.get("company_name")
+                or "금융회사 정보 없음"
+            )
+
+            product_name = (
+                product.get("product_name")
+                or "상품명 정보 없음"
+            )
+
+            with st.expander(
+                f"{index}. {company_name} · {product_name} "
+                f"| 적합도 {score:.0f}점",
+                expanded=(index == 1),
+            ):
+                product_type = product.get("product_type")
+                product_type_label = {
+                    "saving": "적금",
+                    "deposit": "예금",
+                }.get(
+                    product_type,
+                    product_type or "정보 없음",
+                )
+
+                term_months = product.get("term_months")
+                base_rate = product.get("base_rate")
+                max_rate = product.get("max_rate")
+
+                p1, p2, p3, p4 = st.columns(4)
+
+                p1.metric(
+                    "상품유형",
+                    product_type_label,
+                )
+
+                p2.metric(
+                    "가입기간",
+                    (
+                        f"{term_months}개월"
+                        if term_months is not None
+                        else "정보 없음"
+                    ),
+                )
+
+                p3.metric(
+                    "기본금리",
+                    (
+                        f"{float(base_rate):.2f}%"
+                        if base_rate is not None
+                        else "정보 없음"
+                    ),
+                )
+
+                p4.metric(
+                    "최고금리",
+                    (
+                        f"{float(max_rate):.2f}%"
+                        if max_rate is not None
+                        else "정보 없음"
+                    ),
+                )
+
+                st.write(
+                    "**가입대상:**",
+                    product.get("join_member") or "정보 없음",
+                )
+
+                st.write(
+                    "**가입방법:**",
+                    product.get("join_way") or "정보 없음",
+                )
+
+                reasons = item.get("reasons", [])
+                if reasons:
+                    st.markdown("**추천 이유**")
+                    for reason in reasons:
+                        st.write("•", reason)
+
+                cautions = item.get("cautions", [])
+                if cautions:
+                    st.markdown("**확인할 점**")
+                    for caution in cautions:
+                        st.write("•", caution)
+
+                special_conditions = product.get(
+                    "special_conditions"
+                )
+                if special_conditions:
+                    st.markdown("**우대조건/특이사항**")
+                    st.write(special_conditions)
+
+                etc_note = product.get("etc_note")
+                if etc_note:
+                    st.caption(
+                        f"기타 안내: {etc_note}"
+                    )
+
+    st.caption(
+        "※ 금융상품 정보는 금융감독원 금융상품통합비교공시 API "
+        "조회값을 기반으로 합니다. 실제 가입 전에는 해당 금융회사의 "
+        "최신 상품설명과 가입조건을 다시 확인해야 합니다."
+    )
+
+    st.header("8. 🤖 AI 금융코치")
 
     st.write(
         "금융 진단 결과와 자동 개선안을 바탕으로 "
@@ -940,7 +1148,7 @@ if st.session_state.get("analyzed", False):
             st.write(message["content"])
 
     question = st.chat_input(
-        "예: 왜 제 점수가 낮나요?"
+        "내 금융상태와 개선방법을 질문해보세요!"
     )
 
     if question:
