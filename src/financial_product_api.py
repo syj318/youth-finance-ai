@@ -106,9 +106,9 @@ def _fetch(product_type: str, api_key=None, timeout=10):
         return _result(False, error_code="API_UNAVAILABLE")
 
 
-def fetch_saving_products(api_key=None, timeout=10):
+def fetch_saving_products(api_key=None, timeout=30):
     return _fetch("saving", api_key, timeout)
 
 
-def fetch_deposit_products(api_key=None, timeout=10):
+def fetch_deposit_products(api_key=None, timeout=30):
     return _fetch("deposit", api_key, timeout)
