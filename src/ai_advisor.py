@@ -59,8 +59,9 @@ metrics, risk, plans에 존재하는 정보만 근거로 답변하세요.
 
 CHAT_GROUNDING_RETRY_PROMPT = """직전 답변에는 제공되지 않은 숫자 또는 계산한 수치가 포함되어 사용할 수 없습니다.
 표, 번호 목록, 기간 환산, 비율 계산, 가상의 사례, 일반적인 권장 기준을 모두 제외하세요.
-금융 엔진 컨텍스트에 적힌 사실과 숫자만 그대로 인용해 짧은 한국어 문단 하나로 다시 답하세요.
-컨텍스트에 없는 내용은 판단할 수 없다고 말하고, 새로운 숫자는 절대 쓰지 마세요."""
+금융 엔진 컨텍스트에 적힌 사실만 사용해 짧은 한국어 문단 하나로 다시 답하세요.
+이번 답변에는 숫자나 숫자 기호를 한 글자도 쓰지 마세요.
+컨텍스트에 없는 내용은 판단할 수 없다고 설명하세요."""
 
 ADVICE_SCHEMA = {
     "name": "financial_advice",
@@ -393,13 +394,36 @@ def _uses_only_context_numbers(text: str, context: Mapping[str, Any]) -> bool:
         for match in number_pattern.finditer(context_text)
         if (value := numeric_value(match.group())) is not None
     }
+    negative_magnitudes = {abs(value) for value in allowed if value < 0}
+    negative_meaning = re.compile(r"적자|부족|마이너스|음수|초과")
 
     for match in number_pattern.finditer(text):
         line_prefix = text[text.rfind("\n", 0, match.start()) + 1 : match.start()]
         following = text[match.end() :]
         if not line_prefix.strip() and re.match(r"[.)]\s", following):
             continue
-        if numeric_value(match.group()) not in allowed:
+        if re.match(r"\s*(?:가지|단계|번째|순위|개(?!월)(?:의)?)", following):
+            continue
+        value = numeric_value(match.group())
+        if value in allowed:
+            continue
+        sentence_start = max(
+            text.rfind(".", 0, match.start()),
+            text.rfind("!", 0, match.start()),
+            text.rfind("?", 0, match.start()),
+            text.rfind("\n", 0, match.start()),
+        )
+        sentence_ends = [
+            position
+            for delimiter in ".!?\n"
+            if (position := text.find(delimiter, match.end())) != -1
+        ]
+        sentence_end = min(sentence_ends) if sentence_ends else len(text)
+        sentence = text[sentence_start + 1 : sentence_end]
+        if value in negative_magnitudes and negative_meaning.search(sentence):
+            continue
+        if value not in allowed:
+            logger.debug("컨텍스트에 없는 응답 숫자 표기: %s", match.group())
             return False
     return True
 
