@@ -73,6 +73,15 @@ class AiAdvisorTests(unittest.TestCase):
         self.assertNotIn("52.5", advice["summary"])
         self.assertNotIn("금융 건강점수", advice["summary"])
 
+    def test_does_not_append_copula_to_complete_reason_sentence(self):
+        advice = generate_ai_advice(self.metrics, self.risk, self.plans)
+
+        self.assertIn(
+            "주요 진단 사유는 다음과 같습니다. 현금흐름 여유가 적습니다.",
+            advice["summary"],
+        )
+        self.assertNotIn("적습니다.입니다.", advice["summary"])
+
     def test_fallback_handles_missing_or_invalid_inputs(self):
         advice = generate_ai_advice(None, None, None)
 
