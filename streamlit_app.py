@@ -4,7 +4,7 @@ from src.metrics import calculate_metrics
 from src.risk_engine import calculate_risk
 from src.forecast import forecast_assets
 from src.optimizer import find_improvement_plans
-from src.ai_advisor import generate_ai_advice
+from src.ai_advisor import generate_ai_advice, generate_ai_chat_reply
 
 st.set_page_config(
     page_title="청년 금융 AI",
@@ -694,11 +694,17 @@ if st.session_state.get("analyzed", False):
         "현재 상태와 우선 행동을 이해하기 쉽게 설명합니다."
     )
 
-    advice = generate_ai_advice(
-        metrics,
-        risk,
-        plans
-    )
+    financial_context_signature = repr((metrics, risk, plans))
+    if st.session_state.get("financial_context_signature") != financial_context_signature:
+        st.session_state["financial_context_signature"] = financial_context_signature
+        st.session_state["financial_chat_history"] = []
+        st.session_state["financial_advice"] = generate_ai_advice(
+            metrics,
+            risk,
+            plans,
+        )
+
+    advice = st.session_state["financial_advice"]
 
     st.subheader("📋 현재 금융상태 요약")
     st.info(advice["summary"])
@@ -718,6 +724,40 @@ if st.session_state.get("analyzed", False):
         "※ 금융코치는 기존 금융 진단 및 최적화 결과를 설명하며, "
         "별도의 투자·대출·금융상품 가입 판단을 수행하지 않습니다."
     )
+
+    st.subheader("🗨️ AI 금융코치에게 질문하기")
+    st.caption(
+        "현재 진단 결과, 위험 요인, 자동 개선안에 관해 자유롭게 질문해 보세요."
+    )
+
+    chat_history = st.session_state.setdefault("financial_chat_history", [])
+    for message in chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    question = st.chat_input("예: 왜 제 점수가 낮나요?")
+    if question:
+        with st.chat_message("user"):
+            st.markdown(question)
+
+        previous_history = list(chat_history)
+        with st.chat_message("assistant"):
+            with st.spinner("현재 금융 진단 결과를 확인하고 있어요..."):
+                reply = generate_ai_chat_reply(
+                    question,
+                    metrics,
+                    risk,
+                    plans,
+                    chat_history=previous_history,
+                )
+            st.markdown(reply)
+
+        chat_history.extend(
+            [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": reply},
+            ]
+        )
 
 st.divider()
 
