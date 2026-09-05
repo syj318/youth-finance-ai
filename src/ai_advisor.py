@@ -170,7 +170,8 @@ def generate_ai_advice(metrics, risk, plans) -> Dict[str, Any]:
 
     reasons = safe_risk.get("reasons", [])
     if isinstance(reasons, list) and reasons:
-        summary += f" 주요 진단 사유는 {'; '.join(_display(item) for item in reasons)}입니다."
+        reason_text = " ".join(_display(item).strip() for item in reasons)
+        summary += f" 주요 진단 사유는 다음과 같습니다. {reason_text}"
 
     return {
         "summary": summary,
