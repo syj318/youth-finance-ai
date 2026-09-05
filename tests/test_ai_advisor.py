@@ -231,6 +231,29 @@ class AiAdvisorTests(unittest.TestCase):
     def test_number_grounding_still_rejects_unknown_financial_number(self):
         self.assertFalse(_uses_only_context_numbers("위험점수는 99점입니다.", {"score": 47.5}))
 
+    def test_number_grounding_allows_non_financial_counts(self):
+        context = {"score": 47.5}
+
+        self.assertTrue(
+            _uses_only_context_numbers("먼저 확인할 이유는 2가지입니다.", context)
+        )
+        self.assertTrue(_uses_only_context_numbers("1순위 영역을 확인하세요.", context))
+
+    def test_number_grounding_rejects_unit_conversion(self):
+        context = {"monthly_surplus": -400000}
+
+        self.assertFalse(_uses_only_context_numbers("월 잉여금은 -400천원입니다.", context))
+
+    def test_number_grounding_allows_negative_amount_explained_as_deficit(self):
+        context = {"monthly_surplus": -400000}
+
+        self.assertTrue(
+            _uses_only_context_numbers("월 잉여금이 400,000원 적자입니다.", context)
+        )
+        self.assertFalse(
+            _uses_only_context_numbers("월 잉여금이 400,000원 흑자입니다.", context)
+        )
+
     @patch("src.ai_advisor._call_groq", side_effect=RuntimeError("rate limit 429"))
     def test_groq_error_uses_fallback_without_raising(self, call_groq):
         os.environ["GROQ_API_KEY"] = "test-key"
@@ -336,7 +359,7 @@ class AiAdvisorTests(unittest.TestCase):
         self.assertEqual(reply, safe_reply)
         self.assertEqual(call_groq.call_count, 2)
         retry_messages = call_groq.call_args.args[0]
-        self.assertIn("새로운 숫자는 절대 쓰지 마세요", retry_messages[-1]["content"])
+        self.assertIn("숫자나 숫자 기호를 한 글자도 쓰지 마세요", retry_messages[-1]["content"])
 
     @patch("src.ai_advisor._call_groq")
     def test_chat_falls_back_when_retry_is_also_ungrounded(self, call_groq):
