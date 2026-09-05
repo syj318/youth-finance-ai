@@ -1,10 +1,13 @@
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from src.metrics import calculate_metrics
 from src.risk_engine import calculate_risk
 from src.forecast import forecast_assets
 from src.optimizer import find_improvement_plans
-from src.ai_advisor import generate_ai_advice
+from src.ai_advisor import generate_ai_advice, generate_ai_chat_reply
 
 st.set_page_config(
     page_title="청년 금융 AI",
@@ -173,6 +176,7 @@ if st.button(
     type="primary",
     use_container_width=True
 ):
+    st.session_state["financial_chat_history"] = []
     if income == 0:
         st.error("월 소득을 입력해주세요.")
         st.session_state["analyzed"] = False
@@ -694,11 +698,34 @@ if st.session_state.get("analyzed", False):
         "현재 상태와 우선 행동을 이해하기 쉽게 설명합니다."
     )
 
-    advice = generate_ai_advice(
-        metrics,
-        risk,
-        plans
+    financial_signature = (
+        income,
+        fixed_expense,
+        living_expense,
+        debt_payment,
+        monthly_savings,
+        savings,
     )
+
+    if (
+        st.session_state.get("chat_financial_signature")
+        != financial_signature
+    ):
+        st.session_state["financial_chat_history"] = []
+        st.session_state["chat_financial_signature"] = financial_signature
+
+    if (
+        "ai_advice" not in st.session_state
+        or st.session_state.get("ai_advice_signature") != financial_signature
+    ):
+        st.session_state["ai_advice"] = generate_ai_advice(
+            metrics,
+            risk,
+            plans
+        )
+        st.session_state["ai_advice_signature"] = financial_signature
+
+    advice = st.session_state["ai_advice"]
 
     st.subheader("📋 현재 금융상태 요약")
     st.info(advice["summary"])
@@ -718,6 +745,57 @@ if st.session_state.get("analyzed", False):
         "※ 금융코치는 기존 금융 진단 및 최적화 결과를 설명하며, "
         "별도의 투자·대출·금융상품 가입 판단을 수행하지 않습니다."
     )
+
+    st.subheader("💬 AI 금융코치에게 질문하기")
+
+    st.caption(
+        "현재 금융 진단 결과와 자동 개선안을 바탕으로 답변합니다."
+    )
+
+    if "financial_chat_history" not in st.session_state:
+        st.session_state["financial_chat_history"] = []
+
+    for message in st.session_state["financial_chat_history"]:
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
+
+    question = st.chat_input(
+        "예: 왜 제 점수가 낮나요?"
+    )
+
+    if question:
+        previous_history = st.session_state[
+            "financial_chat_history"
+        ].copy()
+
+        st.session_state["financial_chat_history"].append(
+            {
+                "role": "user",
+                "content": question
+            }
+        )
+
+        with st.chat_message("user"):
+            st.write(question)
+
+        reply = generate_ai_chat_reply(
+            question,
+            metrics,
+            risk,
+            plans,
+            chat_history=previous_history,
+        )
+
+        st.session_state["financial_chat_history"].append(
+            {
+                "role": "assistant",
+                "content": reply
+            }
+        )
+
+        with st.chat_message("assistant"):
+            st.write(reply)
+
 
 st.divider()
 
