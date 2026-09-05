@@ -161,7 +161,7 @@ def _priority(risk: Mapping[str, Any]) -> str:
     if domain.get("level") is not None:
         details.append(f"등급 {_display(domain['level'])}")
     suffix = f" ({', '.join(details)})" if details else ""
-    return f"현재 영역별 결과에서는 {label}{suffix}을(를) 가장 먼저 점검하는 것이 좋습니다."
+    return f"현재 영역별 결과에서는 {label} 영역{suffix}을 가장 먼저 점검하는 것이 좋습니다."
 
 
 def _plan_action(plan: Mapping[str, Any]) -> str:
@@ -410,15 +410,26 @@ def generate_ai_advice(metrics, risk, plans) -> Dict[str, Any]:
             ),
         },
     ]
-    try:
-        advice = json.loads(_call_groq(messages, ADVICE_SCHEMA))
-        if not _valid_advice(advice):
-            return fallback
-        if not _uses_only_context_numbers(json.dumps(advice, ensure_ascii=False), context):
-            return fallback
-        return advice
-    except Exception:
-        return fallback
+    retry_instruction = {
+        "role": "system",
+        "content": (
+            "이전 생성은 금융 수치 안전규칙을 충족하지 못했습니다. "
+            "이번에는 숫자, 금액, 비율, 점수, 개월 수를 전혀 쓰지 말고 "
+            "제공된 위험 사유와 개선안 이름만으로 JSON을 작성하세요."
+        ),
+    }
+    for attempt in range(2):
+        request_messages = messages if attempt == 0 else [messages[0], retry_instruction, *messages[1:]]
+        try:
+            advice = json.loads(_call_groq(request_messages, ADVICE_SCHEMA))
+            if not _valid_advice(advice):
+                continue
+            if not _uses_only_context_numbers(json.dumps(advice, ensure_ascii=False), context):
+                continue
+            return advice
+        except Exception:
+            continue
+    return fallback
 
 
 def _generate_fallback_chat_reply(question, metrics, risk, plans) -> str:
@@ -478,21 +489,31 @@ def generate_ai_chat_reply(
             ),
         }
     )
-    try:
-        reply = _call_groq(messages)
-        grounded_context = {
-            **context,
-            "user_provided_text": [
-                *(
-                    message["content"]
-                    for message in messages[1:-1]
-                    if message["role"] == "user"
-                ),
-                clean_question,
-            ],
-        }
-        if not _uses_only_context_numbers(reply, grounded_context):
-            return fallback
-        return reply
-    except Exception:
-        return fallback
+    grounded_context = {
+        **context,
+        "user_provided_text": [
+            *(
+                message["content"]
+                for message in messages[1:-1]
+                if message["role"] == "user"
+            ),
+            clean_question,
+        ],
+    }
+    retry_instruction = {
+        "role": "system",
+        "content": (
+            "이전 생성은 금융 수치 안전규칙을 충족하지 못했습니다. "
+            "엔진이나 사용자 질문에 있는 숫자도 반복하지 말고, 숫자·금액·비율·기간을 "
+            "전혀 쓰지 않은 자연스러운 한국어로 질문에 다시 답하세요."
+        ),
+    }
+    for attempt in range(2):
+        request_messages = messages if attempt == 0 else [messages[0], retry_instruction, *messages[1:]]
+        try:
+            reply = _call_groq(request_messages)
+            if _uses_only_context_numbers(reply, grounded_context):
+                return reply
+        except Exception:
+            continue
+    return fallback

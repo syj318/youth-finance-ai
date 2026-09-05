@@ -224,6 +224,32 @@ class AiAdvisorTests(unittest.TestCase):
 
         self.assertNotIn("99", result["summary"])
         self.assertIn("47.5", result["summary"])
+        self.assertEqual(call_groq.call_count, 2)
+
+    @patch("src.ai_advisor._call_groq")
+    def test_advice_retries_without_numbers_after_safety_rejection(self, call_groq):
+        os.environ["GROQ_API_KEY"] = "test-key"
+        unsafe = {
+            "summary": "금융 건강점수는 99점입니다.",
+            "priority": "현금흐름을 확인하세요.",
+            "actions": ["행동 가", "행동 나", "행동 다"],
+            "plan_comment": "개선안을 확인하세요.",
+        }
+        safe = {
+            "summary": "현금흐름 여유를 점검할 필요가 있습니다.",
+            "priority": "현금흐름 영역을 먼저 확인하세요.",
+            "actions": ["반복 지출을 점검하세요.", "개선안을 확인하세요.", "실행 가능성을 살펴보세요."],
+            "plan_comment": "부담 최소형부터 검토해 보세요.",
+        }
+        call_groq.side_effect = [
+            json.dumps(unsafe, ensure_ascii=False),
+            json.dumps(safe, ensure_ascii=False),
+        ]
+
+        result = generate_ai_advice(self.metrics, self.risk, self.plans)
+
+        self.assertEqual(result, safe)
+        self.assertEqual(call_groq.call_count, 2)
 
     def test_chat_handles_empty_question_and_missing_key(self):
         self.assertIsInstance(
@@ -299,6 +325,23 @@ class AiAdvisorTests(unittest.TestCase):
 
         self.assertIsInstance(reply, str)
         self.assertIn("기존 금융 진단 결과", reply)
+        self.assertEqual(call_groq.call_count, 2)
+
+    @patch("src.ai_advisor._call_groq")
+    def test_chat_retries_after_ungrounded_number(self, call_groq):
+        os.environ["GROQ_API_KEY"] = "test-key"
+        safe_reply = "현재 비상자금 수준과 현금흐름을 먼저 점검해 보세요."
+        call_groq.side_effect = [
+            "비상자금을 99개월분 마련하세요.",
+            safe_reply,
+        ]
+
+        reply = generate_ai_chat_reply(
+            "무엇부터 해야 해?", self.metrics, self.risk, self.plans
+        )
+
+        self.assertEqual(reply, safe_reply)
+        self.assertEqual(call_groq.call_count, 2)
 
 
 if __name__ == "__main__":
