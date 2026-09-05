@@ -26,6 +26,19 @@ def _display(value: Any) -> str:
     return str(value)
 
 
+def _format_reasons(reasons: List[Any]) -> str:
+    """완결된 진단 사유들을 중복 종결어나 세미콜론 없이 연결한다."""
+    sentences = []
+    for reason in reasons:
+        sentence = _display(reason).strip().rstrip(";").strip()
+        if not sentence:
+            continue
+        if sentence[-1] not in ".!?。！？":
+            sentence += "."
+        sentences.append(sentence)
+    return " ".join(sentences)
+
+
 def _health_score(metrics: Mapping[str, Any], risk: Mapping[str, Any]) -> Any:
     breakdown = risk.get("score_breakdown")
     if isinstance(breakdown, Mapping) and "health_score" in breakdown:
@@ -170,8 +183,9 @@ def generate_ai_advice(metrics, risk, plans) -> Dict[str, Any]:
 
     reasons = safe_risk.get("reasons", [])
     if isinstance(reasons, list) and reasons:
-        reason_text = " ".join(_display(item).strip() for item in reasons)
-        summary += f" 주요 진단 사유는 다음과 같습니다. {reason_text}"
+        reason_text = _format_reasons(reasons)
+        if reason_text:
+            summary += f" 주요 진단 사유는 다음과 같습니다. {reason_text}"
 
     return {
         "summary": summary,
