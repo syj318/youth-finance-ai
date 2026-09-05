@@ -7,10 +7,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Mapping
 
+
+logger = logging.getLogger(__name__)
 
 DOMAIN_LABELS = {
     "cashflow": "현금흐름",
@@ -52,6 +56,11 @@ metrics, risk, plans에 존재하는 정보만 근거로 답변하세요.
 특정 주식·코인 매수/매도, 대출 또는 금융상품 가입을 직접 권유하지 마세요.
 데이터에 없는 내용은 현재 제공된 정보만으로 판단할 수 없다고 설명하세요.
 한국어로 자연스럽고 구체적이되 간결하게 답변하세요."""
+
+CHAT_GROUNDING_RETRY_PROMPT = """직전 답변에는 제공되지 않은 숫자 또는 계산한 수치가 포함되어 사용할 수 없습니다.
+표, 번호 목록, 기간 환산, 비율 계산, 가상의 사례, 일반적인 권장 기준을 모두 제외하세요.
+금융 엔진 컨텍스트에 적힌 사실과 숫자만 그대로 인용해 짧은 한국어 문단 하나로 다시 답하세요.
+컨텍스트에 없는 내용은 판단할 수 없다고 말하고, 새로운 숫자는 절대 쓰지 마세요."""
 
 ADVICE_SCHEMA = {
     "name": "financial_advice",
@@ -147,13 +156,32 @@ def _priority(risk: Mapping[str, Any]) -> str:
 
     key, domain = max(scored, key=lambda item: item[1]["score"])
     label = DOMAIN_LABELS.get(key, key)
-    details = []
-    if "score" in domain:
-        details.append(f"위험점수 {_display(domain['score'])}")
+    reason = None
+    domain_reasons = domain.get("reasons")
+    if isinstance(domain_reasons, list):
+        for item in domain_reasons:
+            if isinstance(item, Mapping) and isinstance(item.get("message"), str):
+                reason = item["message"].strip()
+                if reason:
+                    break
+    if not reason and isinstance(domain.get("explanation"), str):
+        reason = domain["explanation"].strip()
+
+    if reason:
+        if reason[-1] not in ".!?。！？":
+            reason += "."
+        return (
+            f"현재 가장 먼저 점검할 영역은 {label}이며, "
+            f"'{reason}'라는 진단 사유가 제시되었기 때문입니다."
+        )
+
+    details = [f"영역 위험점수가 {_display(domain['score'])}점"]
     if domain.get("level") is not None:
-        details.append(f"등급 {_display(domain['level'])}")
-    suffix = f" ({', '.join(details)})" if details else ""
-    return f"현재 영역별 결과에서는 {label}{suffix}을(를) 가장 먼저 점검하는 것이 좋습니다."
+        details.append(f"위험등급이 {_display(domain['level'])}")
+    return (
+        f"현재 가장 먼저 점검할 영역은 {label}이며, "
+        f"{'이고 '.join(details)}이기 때문입니다."
+    )
 
 
 def _plan_action(plan: Mapping[str, Any]) -> str:
@@ -344,10 +372,36 @@ def _valid_advice(value: Any) -> bool:
 
 
 def _uses_only_context_numbers(text: str, context: Mapping[str, Any]) -> bool:
-    """LLM 출력의 숫자가 제공된 컨텍스트에 실제로 존재하는지 확인한다."""
-    number_pattern = r"(?<![\d.])[-+]?\d+(?:\.\d+)?(?![\d.])"
-    allowed = set(re.findall(number_pattern, json.dumps(context, ensure_ascii=False)))
-    return set(re.findall(number_pattern, text)).issubset(allowed)
+    """LLM 출력의 금융 수치가 컨텍스트에 실제로 존재하는지 확인한다.
+
+    같은 값의 소수점/천 단위 표기 차이는 허용하고, 줄 시작의 목록 번호는
+    금융 수치가 아니므로 검사에서 제외한다.
+    """
+    number_pattern = re.compile(
+        r"(?<![\d.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![\d.])"
+    )
+
+    def numeric_value(raw: str) -> Decimal | None:
+        try:
+            return Decimal(raw.replace(",", ""))
+        except InvalidOperation:
+            return None
+
+    context_text = json.dumps(context, ensure_ascii=False)
+    allowed = {
+        value
+        for match in number_pattern.finditer(context_text)
+        if (value := numeric_value(match.group())) is not None
+    }
+
+    for match in number_pattern.finditer(text):
+        line_prefix = text[text.rfind("\n", 0, match.start()) + 1 : match.start()]
+        following = text[match.end() :]
+        if not line_prefix.strip() and re.match(r"[.)]\s", following):
+            continue
+        if numeric_value(match.group()) not in allowed:
+            return False
+    return True
 
 
 def _redact_personal_information(text: str) -> str:
@@ -405,11 +459,15 @@ def generate_ai_advice(metrics, risk, plans) -> Dict[str, Any]:
     try:
         advice = json.loads(_call_groq(messages, ADVICE_SCHEMA))
         if not _valid_advice(advice):
+            logger.warning("Groq 금융 코칭 응답이 스키마 검증에 실패했습니다.")
             return fallback
         if not _uses_only_context_numbers(json.dumps(advice, ensure_ascii=False), context):
+            logger.warning("Groq 금융 코칭 응답이 숫자 근거 검증에 실패했습니다.")
             return fallback
+        advice["priority"] = _priority(risk if isinstance(risk, Mapping) else {})
         return advice
     except Exception:
+        logger.exception("Groq 금융 코칭 생성 중 오류가 발생해 fallback을 사용합니다.")
         return fallback
 
 
@@ -484,7 +542,18 @@ def generate_ai_chat_reply(
             ],
         }
         if not _uses_only_context_numbers(reply, grounded_context):
-            return fallback
+            logger.warning("Groq 채팅 응답이 숫자 근거 검증에 실패했습니다.")
+            retry_messages = [
+                *messages,
+                {"role": "assistant", "content": reply},
+                {"role": "system", "content": CHAT_GROUNDING_RETRY_PROMPT},
+            ]
+            retry_reply = _call_groq(retry_messages)
+            if not _uses_only_context_numbers(retry_reply, grounded_context):
+                logger.warning("Groq 채팅 재시도 응답도 숫자 근거 검증에 실패했습니다.")
+                return fallback
+            return retry_reply
         return reply
     except Exception:
+        logger.exception("Groq 채팅 응답 생성 중 오류가 발생해 fallback을 사용합니다.")
         return fallback

@@ -8,6 +8,7 @@ from unittest.mock import patch
 from src.ai_advisor import (
     _build_financial_context,
     _call_groq,
+    _uses_only_context_numbers,
     generate_ai_advice,
     generate_ai_chat_reply,
 )
@@ -195,8 +196,40 @@ class AiAdvisorTests(unittest.TestCase):
 
         result = generate_ai_advice(self.metrics, self.risk, self.plans)
 
-        self.assertEqual(result, expected)
+        self.assertEqual(result["summary"], expected["summary"])
+        self.assertEqual(result["actions"], expected["actions"])
+        self.assertEqual(result["plan_comment"], expected["plan_comment"])
+        self.assertEqual(
+            result["priority"],
+            "현재 가장 먼저 점검할 영역은 현금흐름이며, "
+            "영역 위험점수가 18점이고 위험등급이 위험이기 때문입니다.",
+        )
         self.assertIsNotNone(call_groq.call_args.args[1])
+
+    def test_priority_replaces_severity_word_with_complete_grounded_sentence(self):
+        os.environ["GROQ_API_KEY"] = "test-key"
+        response = {
+            "summary": "위험점수는 47.5점입니다.",
+            "priority": "중간",
+            "actions": ["행동 가", "행동 나", "행동 다"],
+            "plan_comment": "부담 최소형의 예상 위험점수는 38입니다.",
+        }
+
+        with patch("src.ai_advisor._call_groq", return_value=json.dumps(response, ensure_ascii=False)):
+            result = generate_ai_advice(self.metrics, self.risk, self.plans)
+
+        self.assertNotEqual(result["priority"], "중간")
+        self.assertIn("가장 먼저 점검할 영역은 현금흐름", result["priority"])
+        self.assertTrue(result["priority"].endswith("때문입니다."))
+
+    def test_number_grounding_accepts_equivalent_formatting_and_list_numbers(self):
+        context = {"score": 47.5, "amount": 50000}
+        reply = "위험점수는 47.50점입니다.\n1. 50,000원을 점검하세요.\n2. 계획을 확인하세요."
+
+        self.assertTrue(_uses_only_context_numbers(reply, context))
+
+    def test_number_grounding_still_rejects_unknown_financial_number(self):
+        self.assertFalse(_uses_only_context_numbers("위험점수는 99점입니다.", {"score": 47.5}))
 
     @patch("src.ai_advisor._call_groq", side_effect=RuntimeError("rate limit 429"))
     def test_groq_error_uses_fallback_without_raising(self, call_groq):
@@ -271,6 +304,54 @@ class AiAdvisorTests(unittest.TestCase):
         self.assertEqual(reply, call_groq.return_value)
         messages = call_groq.call_args.args[0]
         self.assertEqual(messages[-2]["role"], "user")
+
+    @patch("src.ai_advisor._call_groq")
+    def test_chat_accepts_equivalent_number_formatting_and_numbered_list(self, call_groq):
+        os.environ["GROQ_API_KEY"] = "test-key"
+        call_groq.return_value = (
+            "위험점수는 47.50점입니다.\n"
+            "1. 생활비 50,000원을 점검하세요.\n"
+            "2. 현금흐름 개선안을 확인하세요."
+        )
+
+        reply = generate_ai_chat_reply(
+            "왜 점수가 낮나요?", self.metrics, self.risk, self.plans
+        )
+
+        self.assertEqual(reply, call_groq.return_value)
+
+    @patch("src.ai_advisor._call_groq")
+    def test_chat_retries_grounding_failure_and_returns_safe_reply(self, call_groq):
+        os.environ["GROQ_API_KEY"] = "test-key"
+        safe_reply = "현재 위험점수는 47.50점이며 현금흐름을 먼저 점검해야 합니다."
+        call_groq.side_effect = [
+            "일반적인 권장 기준은 80점입니다.",
+            safe_reply,
+        ]
+
+        reply = generate_ai_chat_reply(
+            "왜 점수가 낮나요?", self.metrics, self.risk, self.plans
+        )
+
+        self.assertEqual(reply, safe_reply)
+        self.assertEqual(call_groq.call_count, 2)
+        retry_messages = call_groq.call_args.args[0]
+        self.assertIn("새로운 숫자는 절대 쓰지 마세요", retry_messages[-1]["content"])
+
+    @patch("src.ai_advisor._call_groq")
+    def test_chat_falls_back_when_retry_is_also_ungrounded(self, call_groq):
+        os.environ["GROQ_API_KEY"] = "test-key"
+        call_groq.side_effect = [
+            "일반적인 권장 기준은 80점입니다.",
+            "최소 90점이 필요합니다.",
+        ]
+
+        reply = generate_ai_chat_reply(
+            "왜 점수가 낮나요?", self.metrics, self.risk, self.plans
+        )
+
+        self.assertIn("기존 금융 진단 결과", reply)
+        self.assertEqual(call_groq.call_count, 2)
 
     @patch("src.ai_advisor._call_groq")
     def test_chat_allows_echoing_user_budget_but_redacts_pii(self, call_groq):
