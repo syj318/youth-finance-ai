@@ -1,4 +1,7 @@
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from src.metrics import calculate_metrics
 from src.risk_engine import calculate_risk
@@ -173,6 +176,7 @@ if st.button(
     type="primary",
     use_container_width=True
 ):
+    st.session_state["financial_chat_history"] = []
     if income == 0:
         st.error("월 소득을 입력해주세요.")
         st.session_state["analyzed"] = False
@@ -694,17 +698,34 @@ if st.session_state.get("analyzed", False):
         "현재 상태와 우선 행동을 이해하기 쉽게 설명합니다."
     )
 
-    financial_context_signature = repr((metrics, risk, plans))
-    if st.session_state.get("financial_context_signature") != financial_context_signature:
-        st.session_state["financial_context_signature"] = financial_context_signature
+    financial_signature = (
+        income,
+        fixed_expense,
+        living_expense,
+        debt_payment,
+        monthly_savings,
+        savings,
+    )
+
+    if (
+        st.session_state.get("chat_financial_signature")
+        != financial_signature
+    ):
         st.session_state["financial_chat_history"] = []
-        st.session_state["financial_advice"] = generate_ai_advice(
+        st.session_state["chat_financial_signature"] = financial_signature
+
+    if (
+        "ai_advice" not in st.session_state
+        or st.session_state.get("ai_advice_signature") != financial_signature
+    ):
+        st.session_state["ai_advice"] = generate_ai_advice(
             metrics,
             risk,
-            plans,
+            plans
         )
+        st.session_state["ai_advice_signature"] = financial_signature
 
-    advice = st.session_state["financial_advice"]
+    advice = st.session_state["ai_advice"]
 
     st.subheader("📋 현재 금융상태 요약")
     st.info(advice["summary"])
@@ -727,7 +748,7 @@ if st.session_state.get("analyzed", False):
 
     st.subheader("🗨️ AI 금융코치에게 질문하기")
     st.caption(
-        "현재 진단 결과, 위험 요인, 자동 개선안에 관해 자유롭게 질문해 보세요."
+        "현재 금융 진단 결과와 자동 개선안을 바탕으로 답변합니다."
     )
 
     chat_history = st.session_state.setdefault("financial_chat_history", [])
@@ -758,7 +779,6 @@ if st.session_state.get("analyzed", False):
                 {"role": "assistant", "content": reply},
             ]
         )
-
 st.divider()
 
 st.caption(
